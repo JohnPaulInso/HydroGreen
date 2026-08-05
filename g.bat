@@ -11,14 +11,13 @@
 :: =============================================
 
 :: -- Element: commit message builder --
-:: Generates a fallback timestamp in case no message is passed
-for /f "tokens=1-4 delims=/ " %%a in ('date /t') do set TODAY=%%a %%b %%c %%d
-for /f "tokens=1-2 delims=: " %%a in ('time /t') do set NOW=%%a:%%b
+:: (2026-07-13) Format timestamp as Aug 5, 2026 12-hr am/pm; previously date/t time/t
+for /f "delims=" %%a in ('powershell -NoProfile -Command "(Get-Date).ToString('MMM d, yyyy, h:mm tt')"') do set "TS=%%a"
 
 :: -- Element: commitMsg - uses %~1 (first argument stripped of quotes) if provided --
 :: Falls back to auto-timestamp if no argument was passed
 if "%~1"=="" (
-    set "commitMsg=Update: %TODAY% %NOW%"
+    set "commitMsg=Update: %TS%"
 ) else (
     set "commitMsg=%~1"
 )
@@ -26,7 +25,7 @@ if "%~1"=="" (
 echo.
 echo ============================================
 echo  HydroTrack - GitHub Auto-Upload
-echo  %TODAY% %NOW%
+echo  %TS%
 echo ============================================
 echo.
 echo  Commit: "%commitMsg%"
