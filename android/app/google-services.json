@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "222210946101",
+    "project_id": "hydrotrack-2317",
+    "storage_bucket": "hydrotrack-2317.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:222210946101:android:23f3d522943dd5fb36ad7c",
+        "android_client_info": {
+          "package_name": "com.hydrotrack.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "222210946101-e24hjq2kueugn4klr6et4ije1ohgst60.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.hydrotrack.app",
+            "certificate_hash": "a09cb9886426bae73387327d29a0c7ad3e7afd1c"
+          }
+        },
+        {
+          "client_id": "222210946101-t9sm5vaf2239gr6f76n6im8m6cn80rkl.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB53U2nn3yihtjj73KgXS4LZ1CkLDiYZas"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "222210946101-t9sm5vaf2239gr6f76n6im8m6cn80rkl.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

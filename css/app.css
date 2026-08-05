@@ -1,0 +1,341 @@
+@font-face{ font-family:'Montserrat'; font-style:normal; font-weight:400; src:url('../assets/fonts/montserrat-latin-400-normal.woff2') format('woff2'); font-display:swap; }
+@font-face{ font-family:'Montserrat'; font-style:normal; font-weight:500; src:url('../assets/fonts/montserrat-latin-500-normal.woff2') format('woff2'); font-display:swap; }
+@font-face{ font-family:'Montserrat'; font-style:normal; font-weight:600; src:url('../assets/fonts/montserrat-latin-600-normal.woff2') format('woff2'); font-display:swap; }
+@font-face{ font-family:'Montserrat'; font-style:normal; font-weight:700; src:url('../assets/fonts/montserrat-latin-700-normal.woff2') format('woff2'); font-display:swap; }
+@font-face{ font-family:'Montserrat'; font-style:normal; font-weight:800; src:url('../assets/fonts/montserrat-latin-800-normal.woff2') format('woff2'); font-display:swap; }
+.font-mono, .font-mono *{ font-variant-numeric: tabular-nums; }
+
+html{ scroll-behavior:smooth; }
+body{ -webkit-font-smoothing:antialiased; }
+
+/* ---- Native-app feel (relevant since this ships inside a WebView/APK) ---- */
+html, body{
+  -webkit-user-select:none; user-select:none;
+  -webkit-touch-callout:none;
+  overscroll-behavior:none;
+}
+input, textarea, [contenteditable]{
+  -webkit-user-select:text; user-select:text; -webkit-touch-callout:default;
+}
+button, a, [role="button"], .tab-btn, .nav-btn{ touch-action:manipulation; }
+::selection{ background:#DCF5E3; }
+
+/* (2026-07-13) Fix bottom margin on all pages; prev: no explicit margin */
+.page{ animation: pageFadeIn .3s ease; margin-bottom: 6rem; padding-bottom: 6rem; }
+@keyframes pageFadeIn{ from{opacity:0; transform:translateY(8px)} to{opacity:1; transform:translateY(0)} }
+@media (prefers-reduced-motion: reduce){ .page{animation:none} }
+
+.nav-btn{ position:relative; }
+.nav-btn.active{ background:rgba(255,255,255,0.12); }
+.nav-btn.active::before{ content:''; position:absolute; left:-24px; top:8px; bottom:8px; width:4px; background:#E8A33D; border-radius:0 4px 4px 0; }
+.tab-btn.active{ color:#14532D; }
+.tab-btn.active .tab-dot{ opacity:1; transform:scale(1); }
+.tab-dot{ opacity:0; transform:scale(.4); transition:.2s ease; }
+
+.pocket-btn, .pocket-chip{ transition: transform .18s ease, box-shadow .18s ease; }
+.pocket-btn:hover, .pocket-chip:hover{ transform: translateY(-2px) scale(1.04); }
+.pocket-btn:active, .pocket-chip:active{ transform: scale(.97); }
+
+.status-seedling{ background:#FDF3D8; border-color:#EFCB5A; }
+.status-transplanted{ background:#E4F6E6; border-color:#8CD9A0; }
+.status-vegetative{ background:#DCEFE1; border-color:#2F8F4E; }
+.status-harvest{ background:#FCEBD8; border-color:#E8A33D; }
+.status-empty{ background:#F5F7F4; border-color:#D8E0DA; border-style:dashed; }
+
+.modal-backdrop{ background: rgba(20,30,24,0.55); backdrop-filter: blur(2px); }
+.modal-panel{ animation: modalIn .28s cubic-bezier(.2,.8,.2,1); }
+@keyframes modalIn{ from{opacity:0; transform:translateY(14px) scale(.98)} to{opacity:1; transform:translateY(0) scale(1)} }
+
+.toast{ animation: toastIn .25s ease; }
+@keyframes toastIn{ from{opacity:0; transform:translateX(16px)} to{opacity:1; transform:translateX(0)} }
+
+input[type="checkbox"].task-check{ accent-color:#2F9E5B; }
+.scrollbar-thin::-webkit-scrollbar{ width:6px; height:6px; }
+.scrollbar-thin::-webkit-scrollbar-thumb{ background:#CBD9CF; border-radius:99px; }
+
+.switch{ width:42px; height:24px; border-radius:99px; background:#D8E0DA; position:relative; transition:.2s; flex-shrink:0; cursor:pointer; }
+.switch::after{ content:''; position:absolute; top:2px; left:2px; width:20px; height:20px; border-radius:99px; background:#fff; box-shadow:0 1px 2px rgba(0,0,0,.25); transition:.2s; }
+.switch.on{ background:#2F9E5B; }
+.switch.on::after{ left:20px; }
+
+.banner-enter{ animation: bannerIn .3s ease; }
+@keyframes bannerIn{ from{opacity:0; transform:translateY(-8px)} to{opacity:1; transform:translateY(0)} }
+
+/* (2026-07-13) Disable black focus outlines globally; prev: browser default */
+*, *:focus, *:focus-visible, button, a, input, select, [tabindex] {
+  outline: none !important;
+  -webkit-tap-highlight-color: transparent !important;
+}
+.tower-pocket{ cursor:pointer; touch-action:none; }
+.tower-pocket:hover .pocket-fill{ filter:brightness(1.08); }
+
+/* (2026-07-13) Fix pocket select ring transform alignment; prev: no transform-box */
+.pocket-select-ring {
+  pointer-events: none;
+  transform-origin: center;
+  transform-box: fill-box;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+/* (2026-07-13) Fix selected pocket ring opacity on hover/active; prev: 0.3 override */
+.tower-pocket:not([data-selected="true"]):hover .pocket-select-ring {
+  opacity: 0.35;
+  stroke-width: 2.5;
+  transform: scale(1.05);
+}
+.tower-pocket:not([data-selected="true"]):active .pocket-select-ring {
+  opacity: 0.6;
+  stroke-width: 3;
+  transform: scale(1.1);
+}
+.tower-pocket[data-selected="true"] .pocket-select-ring {
+  opacity: 1 !important;
+  stroke-width: 3.5;
+  animation: pulse-ring 2s ease-in-out infinite;
+}
+
+@keyframes pulse-ring {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.05); opacity: 0.8; }
+}
+
+/* Improved Touch Targets for Mobile */
+.tower-pocket {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+/* (2026-07-13) Fix tower pocket tapping by enabling pointer events; prev: none */
+.tower-pocket > * {
+  pointer-events: auto;
+}
+
+/* Larger tap area on mobile */
+@media (max-width: 768px) {
+  .tower-pocket circle {
+    r: 16; /* Slightly larger circles on mobile */
+  }
+  .pocket-select-ring {
+    r: 22; /* Larger selection ring on mobile */
+  }
+}
+
+.sync-pulse{ animation:pulseDot 1.6s ease-out infinite; }
+@keyframes pulseDot{ 0%{ transform:scale(1); opacity:.55; } 100%{ transform:scale(2.6); opacity:0; } }
+
+/* ============ ROW LIST IMPROVEMENTS ============ */
+.row-card {
+  background: white;
+  border-radius: 16px;
+  border: 1.5px solid #E2E8E4;
+  padding: 16px;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 1px 3px rgba(20, 83, 45, 0.05);
+}
+
+.row-card:hover {
+  border-color: #2F9E5B;
+  box-shadow: 0 4px 12px rgba(47, 158, 91, 0.15);
+  transform: translateY(-2px);
+}
+
+.row-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #F5F7F4;
+}
+
+.row-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 15px;
+  color: #14532D;
+}
+
+.row-badge {
+  background: #DCF5E3;
+  color: #14532D;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 20px;
+  letter-spacing: 0.3px;
+}
+
+.row-summary {
+  font-size: 13px;
+  color: #5B6B64;
+  margin-bottom: 12px;
+  line-height: 1.5;
+}
+
+.row-pockets-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(48px, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.row-pocket-chip {
+  aspect-ratio: 1;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-center;
+  font-size: 20px;
+  border: 2px solid;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.row-pocket-chip:hover {
+  transform: scale(1.1) rotate(5deg);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+  z-index: 10;
+}
+
+.row-pocket-chip:active {
+  transform: scale(0.95);
+}
+
+.row-pocket-chip::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(255,255,255,0.3) 0%, rgba(255,255,255,0) 100%);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.row-pocket-chip:hover::before {
+  opacity: 1;
+}
+
+/* (2026-07-13) Make pocket chips clean solid squares; prev: narrow dashed pill */
+.pocket-chip {
+  width: 72px !important;
+  height: 72px !important;
+  border-style: solid !important;
+  border-color: #E8A33D !important;
+  border-width: 2px !important;
+  border-radius: 16px !important;
+  background: #FAFCFA !important;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.pocket-chip:hover {
+  transform: translateY(-2px) scale(1.03);
+  box-shadow: 0 4px 10px rgba(0,0,0,0.06);
+}
+.pocket-chip.status-empty {
+  border-style: solid !important;
+  border-color: #E8A33D !important;
+  background: #FAFCFA !important;
+}
+
+.row-pocket-chip.status-empty {
+  background: #F5F7F4;
+  border-color: #D8E0DA;
+  border-style: dashed;
+}
+
+.row-pocket-chip.status-seedling {
+  background: #FDF3D8;
+  border-color: #EFCB5A;
+}
+
+.row-pocket-chip.status-transplanted {
+  background: #E4F6E6;
+  border-color: #8CD9A0;
+}
+
+.row-pocket-chip.status-vegetative {
+  background: #DCEFE1;
+  border-color: #2F8F4E;
+}
+
+.row-pocket-chip.status-harvest {
+  background: #FCEBD8;
+  border-color: #E8A33D;
+}
+
+.row-actions {
+  display: flex;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid #F5F7F4;
+}
+
+.row-action-btn {
+  flex: 1;
+  padding: 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.row-action-btn-primary {
+  background: #2F9E5B;
+  color: white;
+}
+
+.row-action-btn-primary:hover {
+  background: #267a46;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(47, 158, 91, 0.3);
+}
+
+.row-action-btn-secondary {
+  background: #F5F7F4;
+  color: #5B6B64;
+}
+
+.row-action-btn-secondary:hover {
+  background: #E2E8E4;
+  color: #14532D;
+}
+
+.row-action-btn:active {
+  transform: scale(0.97);
+}
+
+/* Empty row state */
+.row-empty-state {
+  text-align: center;
+  padding: 24px;
+  color: #8B9791;
+  font-size: 13px;
+}
+
+.row-empty-state-icon {
+  font-size: 32px;
+  margin-bottom: 8px;
+  opacity: 0.5;
+}
+
+/* Responsive adjustments */
+@media (max-width: 640px) {
+  .row-pockets-container {
+    grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
+    gap: 6px;
+  }
+  
+  .row-pocket-chip {
+    font-size: 18px;
+  }
+  
+  .row-actions {
+    flex-direction: column;
+  }
+}
