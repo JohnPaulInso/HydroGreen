@@ -1,5 +1,8 @@
 /* Auto-generated from lucide-static (ISC license) — bundled locally so icons always render offline. */
 const ICONS = {
+  "log-out": `<path d="m16 17 5-5-5-5" />
+  <path d="M21 12H9" />
+  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />`,
   "layout-dashboard": `<rect width="7" height="9" x="3" y="3" rx="1" />
   <rect width="7" height="5" x="14" y="3" rx="1" />
   <rect width="7" height="9" x="14" y="12" rx="1" />

@@ -1,0 +1,32 @@
+<!-- (2026-07-13) Realistic bok choy lettuce cluster SVG; prev: simple leaf -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100%" height="100%">
+  <defs>
+    <linearGradient id="stemGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#C5E1A5"/>
+      <stop offset="60%" stop-color="#E8F5E9"/>
+      <stop offset="100%" stop-color="#81C784"/>
+    </linearGradient>
+    <linearGradient id="leafGradMain" x1="20%" y1="80%" x2="80%" y2="20%">
+      <stop offset="0%" stop-color="#81C784"/>
+      <stop offset="40%" stop-color="#4CAF50"/>
+      <stop offset="100%" stop-color="#2E7D32"/>
+    </linearGradient>
+    <linearGradient id="leafGradBack" x1="20%" y1="80%" x2="80%" y2="20%">
+      <stop offset="0%" stop-color="#2E7D32"/>
+      <stop offset="100%" stop-color="#1B5E20"/>
+    </linearGradient>
+  </defs>
+  <path d="M 38 45 C 28 35 32 20 48 24 C 54 28 58 36 50 48 Z" fill="url(#leafGradBack)"/>
+  <path d="M 52 42 C 58 26 72 24 82 36 C 88 48 82 62 66 68 Z" fill="url(#leafGradBack)"/>
+  <path d="M 44 32 C 40 22 50 14 62 18 C 66 26 62 38 52 42 Z" fill="#2E7D32"/>
+  <path d="M 30 72 C 18 58 22 38 38 32 C 46 44 45 60 36 76 Z" fill="#4CAF50"/>
+  <path d="M 36 76 C 26 56 36 34 54 24 C 76 22 90 32 86 52 C 82 70 60 78 36 76 Z" fill="url(#leafGradMain)"/>
+  <path d="M 22 84 C 28 72 38 62 52 46 C 64 34 74 26 80 24" fill="none" stroke="#E8F5E9" stroke-width="4.5" stroke-linecap="round"/>
+  <path d="M 22 84 C 28 72 38 62 52 46 C 64 34 74 26 80 24" fill="none" stroke="#DCEDC8" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M 42 56 C 36 50 32 46 34 40" fill="none" stroke="#E8F5E9" stroke-width="1.8" stroke-linecap="round" opacity="0.9"/>
+  <path d="M 50 48 C 58 44 66 40 70 34" fill="none" stroke="#E8F5E9" stroke-width="1.8" stroke-linecap="round" opacity="0.9"/>
+  <path d="M 58 40 C 52 34 48 30 50 26" fill="none" stroke="#E8F5E9" stroke-width="1.5" stroke-linecap="round" opacity="0.85"/>
+  <path d="M 64 33 C 72 32 78 34 82 38" fill="none" stroke="#E8F5E9" stroke-width="1.5" stroke-linecap="round" opacity="0.85"/>
+  <path d="M 36 64 C 30 60 26 56 28 50" fill="none" stroke="#E8F5E9" stroke-width="1.5" stroke-linecap="round" opacity="0.85"/>
+  <ellipse cx="23" cy="85" rx="7" ry="4.5" fill="#DCEDC8" stroke="#9CCC65" stroke-width="1" transform="rotate(-35 23 85)"/>
+</svg>

@@ -91,6 +91,9 @@ const weatherService = {
         country: 'Unknown',
         formatted: 'Unknown Location'
       };
+    }
+  },
+
   // (2026-07-13) Add searchLocation forward geocode; prev: reverseGeocode only
   async searchLocation(query) {
     if (!query || !query.trim()) return null;
@@ -409,6 +412,26 @@ function getWeatherIconEmoji(code){
   return '☁️';
 }
 
+// (2026-07-13) Add unit toggle click handlers to switch green highlight between C and F; prev: unhandled click
+function setupWeatherUnitToggles(){
+  const btnC = document.getElementById('btnUnitC');
+  const btnF = document.getElementById('btnUnitF');
+  if(!btnC || !btnF || btnC.dataset.wired) return;
+  btnC.dataset.wired = '1';
+
+  const updateUnitsUI = (unit) => {
+    currentTempUnit = unit;
+    btnC.className = unit==='C' ? 'text-[10px] font-bold text-white bg-forest px-2 py-0.5 rounded-full transition-all' : 'text-[10px] font-medium text-ink-soft px-2 py-0.5 rounded-full transition-all';
+    btnF.className = unit==='F' ? 'text-[10px] font-bold text-white bg-forest px-2 py-0.5 rounded-full transition-all' : 'text-[10px] font-medium text-ink-soft px-2 py-0.5 rounded-full transition-all';
+    if(cachedWeatherData){
+      renderGoogleWeatherWidget(cachedWeatherData);
+    }
+  };
+
+  btnC.onclick = () => updateUnitsUI('C');
+  btnF.onclick = () => updateUnitsUI('F');
+}
+
 function setupWeatherTabs(){
   const tabTemp = document.getElementById('tabWeatherTemp');
   const tabPrecip = document.getElementById('tabWeatherPrecip');
@@ -421,7 +444,8 @@ function setupWeatherTabs(){
     [tabTemp, tabPrecip, tabWind].forEach(t => {
       if(!t) return;
       const isActive = t.id === `tabWeather${tab.charAt(0).toUpperCase() + tab.slice(1)}`;
-      t.className = isActive ? 'text-forest border-b-2 border-forest pb-1 font-bold cursor-pointer' : 'hover:text-ink pb-1 text-ink-soft cursor-pointer';
+      // (2026-07-13) Segmented pill control active styling toggle; prev: underline border
+      t.className = `px-3.5 py-1.5 rounded-lg text-[12.5px] whitespace-nowrap transition-all flex-shrink-0 cursor-pointer ${isActive ? 'font-bold text-forest bg-white shadow-xs border border-line/60' : 'font-semibold text-ink-soft hover:text-ink bg-transparent hover:bg-white/60 border border-transparent'}`;
     });
     if(cachedWeatherData) renderHourlyGraph(cachedWeatherData);
   };
@@ -431,6 +455,7 @@ function setupWeatherTabs(){
   tabWind.onclick = () => setTab('wind');
 }
 
+// (2026-07-13) Fix chart clipping by adding padLeft & padRight inset margins; prev: point at 560px clipped edge
 function renderHourlyGraph(weather){
   const svg = document.getElementById('weatherHourlySvg');
   if(!svg || !weather || !weather.hourly) return;
@@ -457,16 +482,18 @@ function renderHourlyGraph(weather){
   const minV = Math.min(...values) - (activeWeatherTab==='precip'?5:2);
   const maxV = Math.max(...values) + (activeWeatherTab==='precip'?10:2);
   const range = (maxV - minV) || 1;
-  const width = 600, height = 100, paddingY = 28, graphH = 42;
+  const width = 600, height = 90, padY = 24, graphH = 38;
+  const padLeft = 32, padRight = 32;
+  const stepX = (width - padLeft - padRight) / Math.max(1, values.length - 1);
 
   const points = values.map((v, i)=>{
-    const x = 35 + (i * 75);
-    const y = paddingY + graphH - (((v - minV) / range) * graphH);
+    const x = padLeft + (i * stepX);
+    const y = padY + graphH - (((v - minV) / range) * graphH);
     return { x, y, val: v, time: times[i] ? new Date(times[i]).toLocaleTimeString('en-US',{hour:'numeric'}) : `${i+1}h` };
   });
 
   const pathD = points.map((p, i) => `${i===0?'M':'L'}${p.x},${p.y}`).join(' ');
-  const areaD = `${pathD} L${points[points.length-1].x},${height-15} L${points[0].x},${height-15} Z`;
+  const areaD = `${pathD} L${points[points.length-1].x},${height-14} L${points[0].x},${height-14} Z`;
 
   let html = `<defs>
     <linearGradient id="weatherGrad" x1="0" y1="0" x2="0" y2="1">
@@ -480,10 +507,11 @@ function renderHourlyGraph(weather){
 
   points.forEach(p => {
     html += `<circle cx="${p.x}" cy="${p.y}" r="4" fill="#FFFFFF" stroke="${strokeColor}" stroke-width="2.5"/>`;
-    html += `<text x="${p.x}" y="${p.y - 8}" font-size="11" font-family="Montserrat,sans-serif" font-weight="700" fill="#1C231F" text-anchor="middle">${p.val}${unitSymbol}</text>`;
+    html += `<text x="${p.x}" y="${p.y - 7}" font-size="11" font-family="Montserrat,sans-serif" font-weight="700" fill="#1C231F" text-anchor="middle">${p.val}${unitSymbol}</text>`;
     html += `<text x="${p.x}" y="${height - 2}" font-size="10" font-family="Montserrat,sans-serif" font-weight="500" fill="#5B6B64" text-anchor="middle">${p.time}</text>`;
   });
 
+  svg.setAttribute('viewBox', '0 0 600 90');
   svg.innerHTML = html;
 }
 
@@ -491,6 +519,8 @@ function renderGoogleWeatherWidget(weather, locationName){
   if(!weather || !weather.current) return;
   cachedWeatherData = weather;
   setupWeatherTabs();
+  // (2026-07-13) Wire C/F unit toggles; prev: none
+  setupWeatherUnitToggles();
 
   const c = weather.current;
   const tempC = Math.round(c.temperature);
@@ -506,11 +536,14 @@ function renderGoogleWeatherWidget(weather, locationName){
   const condText = document.getElementById('weatherConditionText');
   if(condText) condText.textContent = c.weatherDesc;
 
-  const detailsLine = document.getElementById('weatherDetailsLine');
-  if(detailsLine){
-    const precipProb = weather.hourly.precipitationProb && weather.hourly.precipitationProb.length ? weather.hourly.precipitationProb[0] : 0;
-    detailsLine.textContent = `Precipitation: ${precipProb}% · Humidity: ${c.humidity}% · Wind: ${Math.round(c.windSpeed)} km/h`;
-  }
+  // (2026-07-13) Populate split detail spans; prev: single weatherDetailsLine
+  const precipProb = weather.hourly.precipitationProb && weather.hourly.precipitationProb.length ? weather.hourly.precipitationProb[0] : 0;
+  const humVal = document.getElementById('weatherHumVal');
+  if(humVal) humVal.textContent = `${c.humidity}%`;
+  const windVal = document.getElementById('weatherWindVal');
+  if(windVal) windVal.textContent = `${Math.round(c.windSpeed)} km/h`;
+  const precipVal = document.getElementById('weatherPrecipVal');
+  if(precipVal) precipVal.textContent = `${precipProb}%`;
 
   const dateSub = document.getElementById('weatherDateSub');
   if(dateSub){
@@ -522,7 +555,7 @@ function renderGoogleWeatherWidget(weather, locationName){
 
   renderHourlyGraph(weather);
 
-  // Render 7-day Daily Forecast Strip
+  // (2026-07-13) 7-day strip as full-bleed column cells; prev: gap grid cards
   const dailyStrip = document.getElementById('weatherDailyStrip');
   if(dailyStrip && weather.daily && weather.daily.dates && weather.daily.dates.length){
     dailyStrip.innerHTML = '';
@@ -532,14 +565,15 @@ function renderGoogleWeatherWidget(weather, locationName){
       const code = weather.daily.weatherCodes[i] || 0;
       const maxT = Math.round(currentTempUnit==='C' ? weather.daily.tempMax[i] : (weather.daily.tempMax[i]*9/5)+32);
       const minT = Math.round(currentTempUnit==='C' ? weather.daily.tempMin[i] : (weather.daily.tempMin[i]*9/5)+32);
-      const card = document.createElement('div');
-      card.className = `flex flex-col items-center p-2 rounded-xl border text-center transition-all ${i===0 ? 'bg-mint/40 border-forest/40 shadow-sm' : 'bg-cream/40 border-line/70'}`;
-      card.innerHTML = `
-        <span class="text-[11px] font-semibold ${i===0?'text-forest':'text-ink-soft'}">${dayShort}</span>
-        <span class="text-2xl my-1">${getWeatherIconEmoji(code)}</span>
-        <span class="text-[11px] font-bold text-ink">${maxT}° <span class="font-normal text-ink-soft">${minT}°</span></span>
+      // (2026-07-13) Google Weather style daily forecast cards with active day highlight; prev: basic column cells
+      const cell = document.createElement('div');
+      cell.className = `flex flex-col items-center py-2 px-2.5 text-center min-w-[56px] rounded-xl border flex-shrink-0 transition-all ${i===0 ? 'bg-forest text-white border-forest shadow-xs' : 'bg-white text-ink border-line/60 hover:border-forest/40'}`;
+      cell.innerHTML = `
+        <span class="text-[11px] font-semibold ${i===0?'text-white':'text-ink-soft'} leading-tight mb-1">${dayShort}</span>
+        <span class="text-[20px] leading-none my-1">${getWeatherIconEmoji(code)}</span>
+        <span class="text-[11px] font-bold ${i===0?'text-white':'text-ink'} leading-tight">${maxT}° <span class="font-normal ${i===0?'text-white/70':'text-ink-soft'}">${minT}°</span></span>
       `;
-      dailyStrip.appendChild(card);
+      dailyStrip.appendChild(cell);
     });
   }
 }
@@ -579,7 +613,7 @@ if (typeof document !== 'undefined') {
     // Start weather monitoring after app loads
     setTimeout(async () => {
       // Only start if weather alerts are enabled
-      if (state && state.settings && (state.settings.rainAlerts || state.settings.windAlerts)) {
+      if (typeof state !== 'undefined' && state && state.settings && (state.settings.rainAlerts || state.settings.windAlerts)) {
         try {
           await weatherService.startMonitoring();
         } catch (error) {

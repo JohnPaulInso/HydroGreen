@@ -12,25 +12,70 @@
 <meta name="apple-mobile-web-app-title" content="HydroTrack">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="assets/icons/icon-192.png">
-<link rel="icon" href="assets/icons/icon-64.png">
+<!-- (2026-07-13) Use uploaded exact lettuce image for favicon; prev: svg favicon -->
+<link rel="icon" type="image/png" href="assets/icons/logo.png">
 <link rel="stylesheet" href="css/tailwind.css">
 <link rel="stylesheet" href="css/app.css">
 </head>
 <body class="bg-cream text-ink font-body">
+<a href="#mainContent" class="skip-link">Skip to main content</a>
+
+<!-- ============ LOGIN OVERLAY ============ -->
+<!-- (2026-07-13) Fix login overlay full screen position; prev: relative positioning -->
+<div id="authOverlay" class="hidden fixed inset-0 bg-forest flex items-center justify-center p-6 overflow-hidden" style="position:fixed; top:0; left:0; width:100vw; height:100vh; z-index:99999;" role="dialog" aria-modal="true" aria-labelledby="authOverlayTitle">
+  <!-- Subtle decorative background leaves -->
+  <svg viewBox="0 0 100 100" aria-hidden="true" class="absolute pointer-events-none" style="top:-30px; left:-30px; width:160px; height:160px; opacity:0.06; fill:#FFFFFF;">
+    <path d="M50 5 C20 35 15 65 50 95 C85 65 80 35 50 5 Z" />
+  </svg>
+  <svg viewBox="0 0 100 100" aria-hidden="true" class="absolute pointer-events-none" style="bottom:-40px; right:-40px; width:200px; height:200px; opacity:0.06; fill:#FFFFFF; transform:rotate(45deg);">
+    <path d="M50 5 C20 35 15 65 50 95 C85 65 80 35 50 5 Z" />
+  </svg>
+  <svg viewBox="0 0 100 100" aria-hidden="true" class="absolute pointer-events-none" style="top:20%; right:10px; width:80px; height:80px; opacity:0.04; fill:#FFFFFF; transform:rotate(-20deg);">
+    <path d="M50 5 C20 35 15 65 50 95 C85 65 80 35 50 5 Z" />
+  </svg>
+  <svg viewBox="0 0 100 100" aria-hidden="true" class="absolute pointer-events-none" style="bottom:20%; left:10px; width:90px; height:90px; opacity:0.04; fill:#FFFFFF; transform:rotate(20deg);">
+    <path d="M50 5 C20 35 15 65 50 95 C85 65 80 35 50 5 Z" />
+  </svg>
+
+  <div class="w-full max-w-sm text-center relative z-10">
+    <div class="w-16 h-16 mx-auto mb-5">
+      <!-- (2026-07-13) Use exact uploaded lettuce PNG image for onboarding logo; prev: SVG -->
+      <img src="assets/icons/logo.png" alt="HydroTrack Logo" class="w-full h-full object-contain">
+    </div>
+    <h1 id="authOverlayTitle" class="font-display text-[24px] font-bold text-white mb-2">Welcome to HydroTrack</h1>
+    <p class="text-white/75 text-[13.5px] mb-8 leading-relaxed">Sign in with Google to access your hydroponic towers and sync your data seamlessly across all your devices.</p>
+
+    <div id="authOverlayLoading" class="hidden flex flex-col items-center gap-3 py-4">
+      <div class="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+      <span class="text-white/60 text-[12.5px]">Checking sign-in status…</span>
+    </div>
+
+    <div id="authOverlayButtons" class="hidden flex flex-col gap-3">
+      <div id="authOverlayError" class="hidden bg-white/10 text-white/80 text-[12px] rounded-lg px-3 py-2 mb-1">Could not complete sign-in — please try again.</div>
+      <button id="btnOverlayGoogleSignIn" type="button" class="w-full bg-white text-ink font-semibold text-[14px] py-3 rounded-xl flex items-center justify-center gap-2.5 hover:bg-white/90 transition-colors shadow-md">
+        <svg class="w-[18px] h-[18px]" viewBox="0 0 24 24"><path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"/><path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.29v3.15C3.26 21.3 7.31 24 12 24z"/><path fill="#FBBC05" d="M5.28 14.24c-.25-.72-.38-1.49-.38-2.24s.13-1.52.38-2.24V6.61H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.39l3.99-3.15z"/><path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.61l3.99 3.15c.95-2.85 3.6-4.96 6.72-4.96z"/></svg>
+        Sign in with Google
+      </button>
+    </div>
+  </div>
+</div>
 
 <div id="app" class="min-h-screen md:flex">
 
   <!-- ============ DESKTOP SIDEBAR ============ -->
   <aside class="hidden md:flex md:flex-col w-64 bg-forest text-white fixed h-full px-6 py-7 z-30">
     <div class="flex items-center gap-2.5 mb-9 pl-1">
-      <div class="w-9 h-9 rounded-xl bg-leaf/90 flex items-center justify-center text-lg">🥬</div>
+      <div class="w-9 h-9 flex-shrink-0 flex items-center justify-center">
+        <!-- (2026-07-13) Use exact uploaded lettuce PNG image for desktop logo; prev: SVG -->
+        <img src="assets/icons/logo.png" alt="HydroTrack Logo" class="w-full h-full object-contain">
+      </div>
       <div>
         <div class="font-display font-semibold text-[17px] leading-tight">HydroTrack</div>
         <div class="text-[11px] text-white/50 -mt-0.5 tracking-wide">TowerCrop System</div>
       </div>
     </div>
 
-    <nav class="flex flex-col gap-1 flex-1">
+    <nav class="flex flex-col gap-1 flex-1" aria-label="Primary">
       <button class="nav-btn active flex items-center gap-3 px-3 py-2.5 rounded-lg text-[14px] font-medium text-white/90 hover:bg-white/10" data-page="dashboard"></button>
       <button class="nav-btn flex items-center gap-3 px-3 py-2.5 rounded-lg text-[14px] font-medium text-white/90 hover:bg-white/10" data-page="tower"></button>
       <button class="nav-btn flex items-center gap-3 px-3 py-2.5 rounded-lg text-[14px] font-medium text-white/90 hover:bg-white/10" data-page="nursery"></button>
@@ -51,7 +96,10 @@
   <!-- ============ MOBILE TOP BAR ============ -->
   <header class="md:hidden sticky top-0 z-30 bg-forest text-white px-4 py-3 flex items-center justify-between shadow-card">
     <div class="flex items-center gap-2">
-      <div class="w-8 h-8 rounded-lg bg-leaf/90 flex items-center justify-center text-base">🥬</div>
+      <div class="w-8 h-8 flex-shrink-0 flex items-center justify-center">
+        <!-- (2026-07-13) Use exact uploaded lettuce PNG image for mobile logo; prev: SVG -->
+        <img src="assets/icons/logo.png" alt="HydroTrack Logo" class="w-full h-full object-contain">
+      </div>
       <span class="font-display font-semibold text-[16px]">HydroTrack</span>
     </div>
     <button id="signInStubMobile" class="p-2 rounded-lg bg-white/10 cloud-icon-mobile relative">
@@ -60,7 +108,7 @@
   </header>
 
   <!-- ============ MAIN ============ -->
-  <main class="flex-1 md:ml-64 px-4 py-5 md:px-10 md:py-9 pb-32 md:pb-20 max-w-6xl mx-auto w-full">
+  <main id="mainContent" tabindex="-1" class="flex-1 md:ml-64 px-4 py-5 md:px-10 md:py-9 pb-32 md:pb-20 max-w-6xl mx-auto w-full">
 
     <!-- ---------- DASHBOARD ---------- -->
     <section id="page-dashboard" class="page pb-32 mb-16">
@@ -88,7 +136,7 @@
         <div id="statCardPlants" class="stat-card bg-white rounded-2xl shadow-card p-4 border border-line">
           <div class="w-9 h-9 rounded-lg bg-mint flex items-center justify-center mb-3 text-forest" id="iconLeaf"></div>
           <div class="font-mono text-2xl font-semibold text-ink" id="statActivePlants">0/0</div>
-          <div class="stat-label text-[12px] text-ink-soft mt-0.5">Active Plants on Tower</div>
+          <div id="statActivePlantsLabel" class="stat-label text-[12px] text-ink-soft mt-0.5">Active Plants on Tower</div>
         </div>
         <div id="statCardSeedlings" class="stat-card bg-white rounded-2xl shadow-card p-4 border border-line">
           <div class="w-9 h-9 rounded-lg bg-mint flex items-center justify-center mb-3 text-forest" id="iconSprout"></div>
@@ -123,10 +171,56 @@
         </div>
       </div>
 
-      <div id="upcomingChangesCard" class="bg-white rounded-2xl shadow-card border border-line p-5">
+      <div id="upcomingChangesCard" class="bg-white rounded-2xl shadow-card border border-line p-5 mb-5">
         <h2 class="font-display font-semibold text-[17px] text-forest mb-1">Upcoming Stage Changes</h2>
         <p class="text-[12.5px] text-ink-soft mb-3">Estimated dates for the next transplant, thinning, or harvest window.</p>
         <div id="upcomingList" class="flex flex-col divide-y divide-line"></div>
+      </div>
+
+      <!-- (2026-07-13) Move Reservoir & Solution Monitor card below upcomingChangesCard; prev: below stats grid -->
+      <div id="dashboardReservoirCard" class="bg-white rounded-2xl shadow-card border border-line p-5 mb-8">
+        <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+          <div>
+            <h2 class="font-display font-semibold text-[17px] text-forest flex items-center gap-2">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-[18px] h-[18px] text-forest"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>
+              Reservoir & Solution Health
+            </h2>
+            <p class="text-[12px] text-ink-soft mt-0.5">Real-time water quality, dosing recommendations, and top-off alerts.</p>
+          </div>
+          <button id="btnOpenReservoirModal" type="button" class="text-[12.5px] font-semibold text-forest bg-mint hover:bg-mint/70 px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
+            <span>✏ Log / Top-off Water</span>
+          </button>
+        </div>
+
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+          <div class="bg-cream/40 rounded-xl p-3 border border-line/60">
+            <div class="text-[11px] font-medium text-ink-soft">pH Acidity</div>
+            <div class="font-mono text-xl font-bold text-ink mt-1" id="resCardPh">6.0</div>
+            <div class="text-[10.5px] font-semibold text-forest mt-0.5" id="resCardPhStatus">Optimal (5.8 - 6.4)</div>
+          </div>
+          <div class="bg-cream/40 rounded-xl p-3 border border-line/60">
+            <div class="text-[11px] font-medium text-ink-soft">EC / Nutrients</div>
+            <div class="font-mono text-xl font-bold text-ink mt-1" id="resCardEc">1.6 <span class="text-xs font-normal">mS/cm</span></div>
+            <div class="text-[10.5px] font-semibold text-forest mt-0.5" id="resCardEcStatus">Optimal (1.2 - 2.0)</div>
+          </div>
+          <div class="bg-cream/40 rounded-xl p-3 border border-line/60">
+            <div class="text-[11px] font-medium text-ink-soft">Solution Temp</div>
+            <div class="font-mono text-xl font-bold text-ink mt-1" id="resCardTemp">22°C</div>
+            <div class="text-[10.5px] font-semibold text-forest mt-0.5" id="resCardTempStatus">Safe (18°C - 23°C)</div>
+          </div>
+          <div class="bg-cream/40 rounded-xl p-3 border border-line/60">
+            <div class="text-[11px] font-medium text-ink-soft">Reservoir Level</div>
+            <div class="font-mono text-xl font-bold text-ink mt-1" id="resCardWater">85%</div>
+            <div class="text-[10.5px] font-semibold text-forest mt-0.5" id="resCardWaterStatus">30L Capacity</div>
+          </div>
+        </div>
+
+        <div id="resDosingAlert" class="bg-mint/40 border border-forest/30 rounded-xl p-3 text-[12px] flex items-center justify-between flex-wrap gap-2">
+          <div class="flex items-center gap-2">
+            <span class="text-base">💡</span>
+            <span id="resDosingText" class="font-medium text-ink">Solution balanced. Next top-off estimated in 3 days.</span>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -134,26 +228,24 @@
 <!-- (2026-07-13) Multi-tower header & move btnAddRow to instructions; prev: single header -->
     <section id="page-tower" class="page hidden pb-32 mb-16">
 <!-- (2026-07-13) Fix tower header layout & remove duplicate plus; prev: cluttered -->
-      <div id="towerHeader" class="flex flex-col gap-2 mb-3">
+      <div id="towerHeader" class="flex flex-col gap-2.5 mb-3">
         <div class="flex items-center justify-between gap-2 flex-wrap">
-          <div class="flex items-center gap-2">
-            <select id="towerSelect" class="font-display text-[18px] font-bold text-forest border border-line rounded-xl px-3 py-1.5 bg-cream/30 focus:border-forest cursor-pointer shadow-sm"></select>
-            <button id="btnRenameTower" type="button" class="text-[12px] font-semibold text-forest bg-mint hover:bg-mint/70 px-2.5 py-1.5 rounded-lg transition-colors flex items-center gap-1" data-icon="edit">Rename</button>
+          <div class="flex items-center gap-2 min-w-0">
+            <select id="towerSelect" class="font-display text-[16px] font-bold text-forest border border-line rounded-xl pl-3 pr-8 py-2 bg-cream/40 focus:border-forest cursor-pointer shadow-sm max-w-[180px] truncate"></select>
+            <button id="btnRenameTower" type="button" class="w-8 h-8 flex-shrink-0 flex items-center justify-center text-forest bg-mint hover:bg-mint/70 rounded-lg transition-colors" data-icon="pencil" aria-label="Rename tower"></button>
           </div>
-          <button id="btnAddTower" type="button" class="text-[12.5px] font-semibold text-white bg-forest hover:bg-forest/90 px-3.5 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 shadow-sm" data-icon="plus">New Tower</button>
+          <button id="btnAddTower" type="button" class="text-[12.5px] font-semibold text-white bg-forest hover:bg-forest/90 px-3.5 py-2 rounded-lg transition-colors flex items-center gap-1.5 shadow-sm flex-shrink-0" data-icon="plus">New Tower</button>
         </div>
-        <p class="text-ink-soft text-[12.5px]" id="towerMeta"></p>
+        <p class="text-ink-soft text-[12.5px] font-mono" id="towerMeta"></p>
       </div>
-      <div id="towerControls" class="mt-3 flex items-center gap-2 max-w-md">
+      <div id="towerControls" class="mt-1 flex items-center gap-2 max-w-md">
         <span id="searchIcon" class="text-ink-soft flex-shrink-0" data-icon="search"></span>
         <input id="towerSearch" type="text" placeholder="Highlight a variety…" class="w-full border border-line rounded-lg px-3 py-1.5 text-[12.5px] bg-white">
         <button id="btnToggleSelectMode" class="flex-shrink-0 text-[12px] font-semibold text-forest bg-mint px-3 py-1.5 rounded-lg flex items-center gap-1.5 whitespace-nowrap" data-icon="check-circle-2">Select</button>
       </div>
 
-<!-- (2026-07-13) Add green tower name in visualizer & default 8 rows; prev: none -->
       <div id="towerVisualizerCard" class="mt-4 bg-white rounded-2xl shadow-card border border-line p-5 md:p-7">
-        <h3 id="visualizerTowerName" class="font-display font-bold text-[18px] text-forest mb-3">Main Tower</h3>
-        <div id="towerDiagram" class="max-w-[220px] mx-auto touch-none"></div>
+        <div id="towerDiagram" class="mx-auto touch-none"></div>
         <div class="flex items-center justify-between mt-3 pt-3 border-t border-line/60 gap-3 flex-wrap">
           <p id="towerInstructions" class="text-[11.5px] text-ink-soft flex-1 min-w-[180px]">Tap a pocket to edit it · press and hold, then drag, to select several at once.</p>
           <button id="btnAddRow" type="button" class="text-[12.5px] font-semibold text-white bg-forest px-3.5 py-2 rounded-lg flex items-center gap-1.5 flex-shrink-0" data-icon="list-plus">Add Row</button>
@@ -196,60 +288,89 @@
       <p class="text-ink-soft text-[13px] mb-6">Daily light schedule, smart weather alerts, and milestone pings.</p>
       <div id="alertBanner2" class="hidden banner-enter mb-5"></div>
 
-      <div class="grid md:grid-cols-2 gap-5">
-        <div class="bg-white rounded-2xl shadow-card border border-line p-5">
-          <h2 class="font-display font-semibold text-[16px] text-forest mb-4 flex items-center gap-2" data-icon-label="sun">Daily Light Schedule</h2>
-          <div class="flex flex-col divide-y divide-line">
-            <div class="flex items-center justify-between py-3"><div><div class="font-medium text-[13.5px]">Morning Sun</div><div class="text-[12px] text-ink-soft">7:00 AM · move tray into direct sun</div></div><div class="switch" data-toggle="sunReminder"></div></div>
-            <div class="flex items-center justify-between py-3"><div><div class="font-medium text-[13.5px]">Midday Heat Protection</div><div class="text-[12px] text-ink-soft">11:00 AM · move to partial shade</div></div><div class="switch" data-toggle="heatReminder"></div></div>
-            <div class="flex items-center justify-between py-3"><div><div class="font-medium text-[13.5px]">Night Darkness</div><div class="text-[12px] text-ink-soft">6:00 PM · lights off near trays</div></div><div class="switch" data-toggle="nightReminder"></div></div>
+<!-- (2026-07-13) Fix time input width & row padding in Daily Light Schedule card; prev: w-[110px] clipped time text -->
+      <div class="grid md:grid-cols-2 gap-5 mb-5">
+        <div class="bg-white rounded-2xl shadow-card border border-line p-5 sm:p-6 flex flex-col justify-between">
+          <div>
+            <h2 class="font-display font-semibold text-[16px] text-forest mb-4 flex items-center gap-2" data-icon-label="sun">Daily Light Schedule</h2>
+            <div class="flex flex-col divide-y divide-line/60">
+              <div class="flex items-center justify-between py-3 gap-2 flex-wrap sm:flex-nowrap"><div class="min-w-0 flex-1"><div class="font-semibold text-[13.5px] text-ink">Morning Sun</div><div class="text-[12px] text-ink-soft">move tray into direct sun</div></div><div class="flex items-center gap-2 flex-shrink-0"><input type="time" class="reminder-time border border-line/80 rounded-lg px-2 py-1 text-[13px] font-mono bg-cream/40 min-w-[126px]" data-time-key="sunTime" value="07:00"><div class="switch" data-toggle="sunReminder" role="switch" aria-checked="false" tabindex="0"></div></div></div>
+              <div class="flex items-center justify-between py-3 gap-2 flex-wrap sm:flex-nowrap"><div class="min-w-0 flex-1"><div class="font-semibold text-[13.5px] text-ink">Midday Heat Protection</div><div class="text-[12px] text-ink-soft">move to partial shade</div></div><div class="flex items-center gap-2 flex-shrink-0"><input type="time" class="reminder-time border border-line/80 rounded-lg px-2 py-1 text-[13px] font-mono bg-cream/40 min-w-[126px]" data-time-key="heatTime" value="11:00"><div class="switch" data-toggle="heatReminder" role="switch" aria-checked="false" tabindex="0"></div></div></div>
+              <div class="flex items-center justify-between py-3 gap-2 flex-wrap sm:flex-nowrap"><div class="min-w-0 flex-1"><div class="font-semibold text-[13.5px] text-ink">Night Darkness</div><div class="text-[12px] text-ink-soft">lights off near trays</div></div><div class="flex items-center gap-2 flex-shrink-0"><input type="time" class="reminder-time border border-line/80 rounded-lg px-2 py-1 text-[13px] font-mono bg-cream/40 min-w-[126px]" data-time-key="nightTime" value="18:00"><div class="switch" data-toggle="nightReminder" role="switch" aria-checked="false" tabindex="0"></div></div></div>
+            </div>
           </div>
-          <div class="mt-4 pt-4 border-t border-line">
-            <button id="btnEnableNotifs" class="w-full text-[12.5px] font-semibold text-forest bg-mint hover:bg-mint/70 px-3 py-2.5 rounded-lg flex items-center justify-center gap-1.5" data-icon="bell">Enable Browser Notifications</button>
+          <div class="mt-5 pt-4 border-t border-line/60">
+            <button id="btnEnableNotifs" class="w-full text-[12.5px] font-semibold text-forest bg-mint hover:bg-mint/70 px-3.5 py-2.5 rounded-lg flex items-center justify-center gap-1.5 transition-colors" data-icon="bell">Enable Browser Notifications</button>
             <p class="text-[11px] text-ink-soft mt-2 text-center">Fires while this tab stays open — real push needs Firebase Cloud Messaging (see note in Tools).</p>
           </div>
         </div>
+<!-- (2026-07-13) World-class Google Weather card redesign with segmented control pills & pill input; prev: cramped text overlap -->
+        <div id="googleWeatherCard" class="bg-white rounded-2xl shadow-card border border-line overflow-hidden">
 
-<!-- (2026-07-13) Fix duplicate header icon on Weather Forecast; prev: duplicate -->
-        <div id="googleWeatherCard" class="bg-white rounded-2xl shadow-card border border-line p-5 overflow-hidden">
-          <h2 class="font-display font-semibold text-[16px] text-forest mb-3 flex items-center gap-2"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-[18px] h-[18px]"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path><path d="M16 14v6"></path><path d="M8 14v6"></path><path d="M12 16v6"></path></svg>Weather Forecast</h2>
-          <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
-            <div class="flex items-center gap-2 flex-1 min-w-[200px]">
-              <span class="text-xl">🏠</span>
-              <input id="locationInput" class="text-[14px] font-semibold text-ink border border-line/60 hover:border-forest/60 focus:border-forest rounded-lg px-3 py-1.5 bg-cream/30 w-full transition-colors" placeholder="e.g. Dakit, Bogo City">
+          <!-- Location & Alerts Header -->
+          <div class="p-4 sm:p-5 border-b border-line/40 bg-mint/10 flex flex-col gap-3">
+            <div class="flex items-center justify-between gap-2.5 bg-white rounded-xl border border-line/80 px-3 py-2 shadow-xs">
+              <div class="flex items-center gap-2 flex-1 min-w-0">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2F9E5B" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0"><path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+                <input id="locationInput" class="flex-1 min-w-0 text-[13.5px] font-semibold text-ink bg-transparent outline-none placeholder:text-ink-soft/60 truncate" placeholder="Enter location…">
+              </div>
+              <button id="btnAutoDetectLocation" type="button" class="flex-shrink-0 text-[11px] font-semibold text-forest border border-forest/30 bg-mint/40 hover:bg-mint/80 px-3 py-1 rounded-full transition-colors whitespace-nowrap">Detect</button>
             </div>
-            <button id="btnAutoDetectLocation" type="button" class="text-[12px] font-semibold text-forest bg-mint hover:bg-mint/70 px-3.5 py-2 rounded-lg flex items-center gap-1.5 transition-colors whitespace-nowrap" data-icon="map-pin">📍 Use precise location</button>
+<!-- (2026-07-13) Flex container with gap-5 flex-wrap and gap-2 for each alert toggle group; prev: tight spacing -->
+            <div class="flex items-center gap-5 flex-wrap px-1 pt-1">
+              <label class="flex items-center gap-2 cursor-pointer select-none mr-4">
+                <div class="switch" data-toggle="rainAlerts" role="switch" aria-checked="false" tabindex="0"></div>
+                <span class="text-[12px] font-medium text-ink-soft whitespace-nowrap">Rain alerts</span>
+              </label>
+              <label class="flex items-center gap-2 cursor-pointer select-none">
+                <div class="switch" data-toggle="windAlerts" role="switch" aria-checked="false" tabindex="0"></div>
+                <span class="text-[12px] font-medium text-ink-soft whitespace-nowrap">Wind alerts</span>
+              </label>
+            </div>
           </div>
 
-          <div id="weatherCurrentContainer" class="flex items-center justify-between py-3 border-b border-line/60 mb-4 flex-wrap gap-4">
-            <div class="flex items-center gap-4">
-              <span id="weatherMainIcon" class="text-5xl flex-shrink-0">⛅</span>
-              <div>
-                <div class="flex items-baseline gap-2">
-                  <span id="weatherTempBig" class="font-mono text-5xl font-extrabold text-ink">28</span>
-                  <span class="text-lg font-semibold text-ink-soft"><button id="btnUnitC" class="font-bold text-forest cursor-pointer">°C</button> | <button id="btnUnitF" class="text-ink-soft hover:text-ink cursor-pointer">°F</button></span>
+          <!-- Hero Row: Left temp/details + Right Condition/Time -->
+          <div id="weatherCurrentContainer" class="p-5 flex items-center justify-between gap-4">
+            <!-- Left side: Big temp + Precip/Hum/Wind -->
+            <div class="flex items-center gap-4 min-w-0">
+              <span id="weatherMainIcon" class="text-[52px] leading-none flex-shrink-0">⛅</span>
+              <div class="min-w-0">
+                <div class="flex items-baseline gap-2 leading-none">
+                  <span id="weatherTempBig" class="text-[50px] font-light text-ink leading-none tracking-tight">32</span>
+                  <div class="flex items-center bg-[#F0F0F0] rounded-full p-0.5 mb-1 gap-0.5 flex-shrink-0 border border-line/40">
+                    <button id="btnUnitC" type="button" class="text-[10.5px] font-bold text-white bg-forest px-2.5 py-0.5 rounded-full transition-all">°C</button>
+                    <button id="btnUnitF" type="button" class="text-[10.5px] font-medium text-ink-soft px-2.5 py-0.5 rounded-full transition-all">°F</button>
+                  </div>
                 </div>
-                <div class="text-[12px] text-ink-soft mt-1" id="weatherDetailsLine">Precipitation: 11% · Humidity: 79% · Wind: 13 km/h</div>
+                <div class="text-[11.5px] text-ink-soft mt-2 leading-snug space-y-0.5 font-medium">
+                  <div>Precipitation: <span id="weatherPrecipVal" class="font-bold text-ink">10%</span></div>
+                  <div>Humidity: <span id="weatherHumVal" class="font-bold text-ink">62%</span></div>
+                  <div>Wind: <span id="weatherWindVal" class="font-bold text-ink">26 km/h</span></div>
+                </div>
               </div>
             </div>
-            <div class="text-right">
-              <h3 class="font-display text-[22px] font-bold text-forest">Weather</h3>
-              <div id="weatherDateSub" class="text-[13px] text-ink-soft">Tuesday 9:00 PM</div>
-              <div id="weatherConditionText" class="text-[13.5px] font-semibold text-ink mt-0.5">Mostly cloudy</div>
+            <!-- Right side: Weather title + time + condition -->
+            <div class="text-right flex-shrink-0">
+              <div class="text-[16px] font-bold text-ink leading-tight">Weather</div>
+              <div id="weatherDateSub" class="text-[11.5px] text-ink-soft mt-1 font-medium">Sunday 1:00 PM</div>
+              <div id="weatherConditionText" class="text-[13px] font-bold text-forest mt-1">Cloudy</div>
             </div>
           </div>
 
-          <div class="flex items-center gap-5 mb-3 border-b border-line/60 pb-2 text-[13px] font-semibold text-ink-soft">
-            <button id="tabWeatherTemp" class="text-forest border-b-2 border-forest pb-1 font-bold">Temperature</button>
-            <button id="tabWeatherPrecip" class="hover:text-ink pb-1">Precipitation</button>
-            <button id="tabWeatherWind" class="hover:text-ink pb-1">Wind</button>
+          <!-- Segmented Control Pill Tabs -->
+          <div class="flex items-center gap-2 px-5 py-2.5 bg-cream/40 border-y border-line/40 overflow-x-auto scrollbar-none">
+            <button id="tabWeatherTemp" type="button" class="px-3.5 py-1.5 rounded-lg text-[12.5px] font-bold text-forest bg-white shadow-xs border border-line/60 whitespace-nowrap transition-all flex-shrink-0">Temperature</button>
+            <button id="tabWeatherPrecip" type="button" class="px-3.5 py-1.5 rounded-lg text-[12.5px] font-semibold text-ink-soft hover:text-ink bg-transparent hover:bg-white/60 border border-transparent whitespace-nowrap transition-all flex-shrink-0">Precipitation</button>
+            <button id="tabWeatherWind" type="button" class="px-3.5 py-1.5 rounded-lg text-[12.5px] font-semibold text-ink-soft hover:text-ink bg-transparent hover:bg-white/60 border border-transparent whitespace-nowrap transition-all flex-shrink-0">Wind</button>
           </div>
 
-          <div id="weatherHourlyChartContainer" class="w-full overflow-x-auto scrollbar-thin py-2 mb-4">
-            <svg id="weatherHourlySvg" class="w-[600px] h-[100px]" viewBox="0 0 600 100" xmlns="http://www.w3.org/2000/svg"></svg>
+          <!-- Hourly Graph -->
+          <div id="weatherHourlyChartContainer" class="w-full overflow-x-auto scrollbar-thin bg-white p-4">
+            <svg id="weatherHourlySvg" class="w-[600px] h-[90px]" viewBox="0 0 600 90" xmlns="http://www.w3.org/2000/svg"></svg>
           </div>
 
-          <div id="weatherDailyStrip" class="grid grid-cols-4 sm:grid-cols-7 gap-2 pt-3 border-t border-line/60"></div>
+          <!-- 7-Day Forecast Cards Strip -->
+          <div id="weatherDailyStrip" class="flex items-center overflow-x-auto scrollbar-thin gap-2.5 p-4 bg-[#F8FAF8] border-t border-line/40"></div>
         </div>
       </div>
 
@@ -345,6 +466,70 @@
       <h1 class="font-display text-[24px] font-semibold text-forest mb-1">Grower Tools</h1>
       <p class="text-ink-soft text-[13px] mb-6">Utilities for nutrient mixing and quick troubleshooting.</p>
 
+      <div class="bg-white rounded-2xl shadow-card border border-line p-5 mb-5">
+        <h2 class="font-display font-semibold text-[16px] text-forest mb-1 flex items-center gap-2" data-icon-label="settings-2">Accessibility</h2>
+        <p class="text-[12.5px] text-ink-soft mb-4">These apply everywhere in the app, not just here.</p>
+        <div class="flex flex-col divide-y divide-line">
+          <label class="flex items-center justify-between py-2.5 cursor-pointer">
+            <span class="text-[13.5px] font-medium">Larger text</span>
+            <div class="switch" data-a11y-toggle="a11yLargeText" role="switch" aria-checked="false" tabindex="0"></div>
+          </label>
+          <label class="flex items-center justify-between py-2.5 cursor-pointer">
+            <span class="text-[13.5px] font-medium">High contrast text</span>
+            <div class="switch" data-a11y-toggle="a11yHighContrast" role="switch" aria-checked="false" tabindex="0"></div>
+          </label>
+          <label class="flex items-center justify-between py-2.5 cursor-pointer">
+            <span class="text-[13.5px] font-medium">Reduce motion</span>
+            <div class="switch" data-a11y-toggle="a11yReduceMotion" role="switch" aria-checked="false" tabindex="0"></div>
+          </label>
+        </div>
+        <p class="text-[11px] text-ink-soft mt-3">Keyboard tip: every pocket on the Tower page is reachable with Tab and opens with Enter or Space. Tab-hold-and-drag selection has a keyboard equivalent too — use the <strong>Select</strong> button, then Enter toggles each pocket.</p>
+      </div>
+
+      <!-- (2026-07-13) Add Staggered Batch Rotation Planner; prev: none -->
+      <div class="bg-white rounded-2xl shadow-card border border-line p-5 mb-5">
+        <h2 class="font-display font-semibold text-[16px] text-forest mb-1 flex items-center gap-2" data-icon-label="repeat">Staggered Batch Rotation Planner</h2>
+        <p class="text-[12.5px] text-ink-soft mb-4">Calculate sowing intervals across your towers for continuous weekly harvests.</p>
+        <div class="grid sm:grid-cols-3 gap-3 text-[12.5px]">
+          <div>
+            <label class="text-[11.5px] font-medium text-ink-soft">Total Towers</label>
+            <input id="rotationTowerCount" type="number" min="1" max="10" value="2" class="w-full border border-line rounded-lg px-2.5 py-1.5 mt-1 font-mono text-[13px]">
+          </div>
+          <div>
+            <label class="text-[11.5px] font-medium text-ink-soft">Crop Cycle (Days)</label>
+            <input id="rotationCropDays" type="number" min="15" max="90" value="45" class="w-full border border-line rounded-lg px-2.5 py-1.5 mt-1 font-mono text-[13px]">
+          </div>
+          <div class="sm:col-span-1 bg-mint/30 rounded-xl p-3 border border-forest/20 flex flex-col justify-center">
+            <div class="text-[11px] font-medium text-forest">Sow New Tray Every</div>
+            <div class="font-mono text-lg font-bold text-forest" id="rotationIntervalText">22 Days</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- (2026-07-13) Add Pest & Leaf Health Diagnostic Guide; prev: none -->
+      <div class="bg-white rounded-2xl shadow-card border border-line p-5 mb-5">
+        <h2 class="font-display font-semibold text-[16px] text-forest mb-1 flex items-center gap-2" data-icon-label="shield-alert">Pest & Leaf Health Diagnostic Guide</h2>
+        <p class="text-[12.5px] text-ink-soft mb-4">Quick reference for identifying nutrient deficiencies, tipburn, and pest issues.</p>
+        <div class="grid sm:grid-cols-2 gap-3 text-[12.5px]">
+          <div class="bg-cream/40 rounded-xl p-3 border border-line/60">
+            <div class="font-semibold text-forest flex items-center gap-1.5">🍃 Nitrogen Deficiency</div>
+            <p class="text-ink-soft text-[11.5px] mt-1">Lower leaves turn pale yellow while upper leaves stay light green. Increase SNAP EC concentration slightly.</p>
+          </div>
+          <div class="bg-cream/40 rounded-xl p-3 border border-line/60">
+            <div class="font-semibold text-forest flex items-center gap-1.5">🍂 Tipburn (Calcium / Heat)</div>
+            <p class="text-ink-soft text-[11.5px] mt-1">Leaf tips turn brown and crispy. Caused by high humidity or midday heat. Increase airflow with a fan.</p>
+          </div>
+          <div class="bg-cream/40 rounded-xl p-3 border border-line/60">
+            <div class="font-semibold text-forest flex items-center gap-1.5">🧪 Iron Chlorosis (pH High)</div>
+            <p class="text-ink-soft text-[11.5px] mt-1">Young leaves show yellowing between green veins. pH is above 6.8 — add pH Down to drop to 6.0.</p>
+          </div>
+          <div class="bg-cream/40 rounded-xl p-3 border border-line/60">
+            <div class="font-semibold text-forest flex items-center gap-1.5">🦟 Aphids / Thrips</div>
+            <p class="text-ink-soft text-[11.5px] mt-1">Tiny yellow spots or curled leaves. Spray with mild neem oil or dilute soap solution early morning.</p>
+          </div>
+        </div>
+      </div>
+
       <div class="grid md:grid-cols-2 gap-5">
         <div class="bg-white rounded-2xl shadow-card border border-line p-5">
           <h2 class="font-display font-semibold text-[16px] text-forest mb-1 flex items-center gap-2" data-icon-label="beaker">SNAP Nutrient Calculator</h2>
@@ -393,7 +578,7 @@
   </main>
 
   <!-- ============ MOBILE BOTTOM TABS ============ -->
-  <nav class="md:hidden fixed bottom-0 inset-x-0 bg-white border-t border-line flex justify-around pt-1.5 pb-2 z-40">
+  <nav class="md:hidden fixed bottom-0 inset-x-0 bg-white border-t border-line flex justify-around pt-1.5 pb-2 z-40" aria-label="Primary">
     <button class="tab-btn active flex flex-col items-center gap-0.5 px-2 py-1 text-[10px] text-ink-soft font-medium" data-page="dashboard"><span class="tab-dot w-1 h-1 rounded-full bg-gold absolute -mt-2"></span></button>
     <button class="tab-btn flex flex-col items-center gap-0.5 px-2 py-1 text-[10px] text-ink-soft font-medium" data-page="tower"><span class="tab-dot w-1 h-1 rounded-full bg-gold absolute -mt-2"></span></button>
     <button class="tab-btn flex flex-col items-center gap-0.5 px-2 py-1 text-[10px] text-ink-soft font-medium" data-page="nursery"><span class="tab-dot w-1 h-1 rounded-full bg-gold absolute -mt-2"></span></button>
@@ -404,14 +589,14 @@
 </div>
 
 <!-- ============ MODALS ============ -->
-<div id="pocketModal" class="hidden fixed inset-0 z-[65] modal-backdrop flex items-end md:items-center justify-center p-0 md:p-4">
+<div id="pocketModal" role="dialog" aria-modal="true" class="hidden fixed inset-0 z-[65] modal-backdrop flex items-end md:items-center justify-center p-0 md:p-4">
   <div class="modal-panel bg-white w-full md:max-w-md rounded-t-3xl md:rounded-3xl p-5 md:p-6 max-h-[92vh] overflow-y-auto scrollbar-thin">
     <div class="flex items-center justify-between mb-4"><h3 class="font-display font-semibold text-[18px] text-forest" id="pocketModalTitle">Pocket</h3><button id="pocketModalClose" class="w-8 h-8 rounded-full bg-cream flex items-center justify-center" data-icon="x"></button></div>
     <div id="pocketModalBody"></div>
   </div>
 </div>
 
-<div id="rowModal" class="hidden fixed inset-0 z-[65] modal-backdrop flex items-end md:items-center justify-center p-0 md:p-4">
+<div id="rowModal" role="dialog" aria-modal="true" class="hidden fixed inset-0 z-[65] modal-backdrop flex items-end md:items-center justify-center p-0 md:p-4">
   <div class="modal-panel bg-white w-full md:max-w-md rounded-t-3xl md:rounded-3xl p-5 md:p-6 max-h-[92vh] overflow-y-auto scrollbar-thin">
     <div class="flex items-center justify-between mb-4"><h3 class="font-display font-semibold text-[18px] text-forest" id="rowModalTitle">Row</h3><button id="rowModalClose" class="w-8 h-8 rounded-full bg-cream flex items-center justify-center" data-icon="x"></button></div>
     <div id="rowModalBody"></div>
@@ -419,7 +604,7 @@
 </div>
 
 <!-- (2026-07-13) Add type, rows & cols inputs to newTowerModal; prev: basic -->
-<div id="newTowerModal" class="hidden fixed inset-0 z-[65] modal-backdrop flex items-end md:items-center justify-center p-0 md:p-4">
+<div id="newTowerModal" role="dialog" aria-modal="true" class="hidden fixed inset-0 z-[65] modal-backdrop flex items-end md:items-center justify-center p-0 md:p-4">
   <div class="modal-panel bg-white w-full md:max-w-sm rounded-t-3xl md:rounded-3xl p-5 md:p-6">
     <div class="flex items-center justify-between mb-3"><h3 class="font-display font-semibold text-[18px] text-forest">Add Hydroponic System</h3><button id="newTowerModalClose" class="w-8 h-8 rounded-full bg-cream flex items-center justify-center" data-icon="x"></button></div>
     <form id="newTowerForm" class="flex flex-col gap-3">
@@ -445,17 +630,21 @@
   </div>
 </div>
 
-<div id="renameTowerModal" class="hidden fixed inset-0 z-[65] modal-backdrop flex items-end md:items-center justify-center p-0 md:p-4">
+<div id="renameTowerModal" role="dialog" aria-modal="true" class="hidden fixed inset-0 z-[65] modal-backdrop flex items-end md:items-center justify-center p-0 md:p-4">
   <div class="modal-panel bg-white w-full md:max-w-sm rounded-t-3xl md:rounded-3xl p-5 md:p-6">
     <div class="flex items-center justify-between mb-3"><h3 class="font-display font-semibold text-[18px] text-forest">Rename Tower</h3><button id="renameTowerModalClose" class="w-8 h-8 rounded-full bg-cream flex items-center justify-center" data-icon="x"></button></div>
     <form id="renameTowerForm" class="flex flex-col gap-3">
       <div><label class="text-[12.5px] font-medium text-ink-soft">New Tower Name</label><input id="renameTowerInput" required type="text" placeholder="e.g. Main Tower" class="w-full border border-line rounded-lg px-3 py-2.5 mt-1 text-[14px]"></div>
       <button type="submit" class="mt-1 bg-forest text-white font-semibold text-[14px] py-2.5 rounded-lg">Save Name</button>
     </form>
+    <div class="mt-4 pt-4 border-t border-line">
+      <button id="btnDeleteTower" type="button" class="w-full text-[12.5px] font-semibold text-clay bg-[#FCEBD8] py-2.5 rounded-lg flex items-center justify-center gap-1.5" data-icon="trash-2">Delete This Tower</button>
+      <p id="deleteTowerHint" class="text-[11px] text-ink-soft text-center mt-2 hidden">You need at least one tower — add another before deleting this one.</p>
+    </div>
   </div>
 </div>
 
-<div id="addRowModal" class="hidden fixed inset-0 z-[65] modal-backdrop flex items-end md:items-center justify-center p-0 md:p-4">
+<div id="addRowModal" role="dialog" aria-modal="true" class="hidden fixed inset-0 z-[65] modal-backdrop flex items-end md:items-center justify-center p-0 md:p-4">
   <div class="modal-panel bg-white w-full md:max-w-sm rounded-t-3xl md:rounded-3xl p-5 md:p-6">
     <div class="flex items-center justify-between mb-4"><h3 class="font-display font-semibold text-[18px] text-forest">Add a New Row</h3><button id="addRowModalClose" class="w-8 h-8 rounded-full bg-cream flex items-center justify-center" data-icon="x"></button></div>
     <form id="addRowForm" class="flex flex-col gap-3">
@@ -466,7 +655,7 @@
 </div>
 
 <!-- (2026-07-13) Update tray form for custom seed & grid; prev: basic count -->
-<div id="trayModal" class="hidden fixed inset-0 z-[65] modal-backdrop flex items-end md:items-center justify-center p-0 md:p-4">
+<div id="trayModal" role="dialog" aria-modal="true" class="hidden fixed inset-0 z-[65] modal-backdrop flex items-end md:items-center justify-center p-0 md:p-4">
   <div class="modal-panel bg-white w-full md:max-w-sm rounded-t-3xl md:rounded-3xl p-5 md:p-6">
     <div class="flex items-center justify-between mb-4"><h3 class="font-display font-semibold text-[18px] text-forest">New Seedling Tray</h3><button id="trayModalClose" class="w-8 h-8 rounded-full bg-cream flex items-center justify-center" data-icon="x"></button></div>
 <!-- (2026-07-13) Show custom seed input only when Custom Variety chosen; prev: always -->
@@ -494,16 +683,53 @@
   </div>
 </div>
 
-<div id="transplantModal" class="hidden fixed inset-0 z-[65] modal-backdrop flex items-end md:items-center justify-center p-0 md:p-4">
-  <div class="modal-panel bg-white w-full md:max-w-sm rounded-t-3xl md:rounded-3xl p-5 md:p-6 max-h-[85vh] overflow-y-auto scrollbar-thin">
-    <div class="flex items-center justify-between mb-3"><h3 class="font-display font-semibold text-[18px] text-forest">Choose Pockets</h3><button id="transplantModalClose" class="w-8 h-8 rounded-full bg-cream flex items-center justify-center" data-icon="x"></button></div>
-    <p class="text-[12.5px] text-ink-soft mb-3">Select empty pockets to transplant this batch into.</p>
-    <div id="transplantPocketGrid" class="grid grid-cols-4 gap-2 mb-4"></div>
-    <button id="btnConfirmTransplant" class="w-full bg-forest text-white font-semibold text-[14px] py-2.5 rounded-lg">Transplant Selected</button>
+<!-- (2026-07-13) Edit tray modal; prev: none -->
+<div id="editTrayModal" role="dialog" aria-modal="true" class="hidden fixed inset-0 z-[65] modal-backdrop flex items-end md:items-center justify-center p-0 md:p-4">
+  <div class="modal-panel bg-white w-full md:max-w-sm rounded-t-3xl md:rounded-3xl p-5 md:p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="font-display font-semibold text-[18px] text-forest">Edit Tray</h3>
+      <button id="editTrayModalClose" class="w-8 h-8 rounded-full bg-cream flex items-center justify-center" data-icon="x"></button>
+    </div>
+    <form id="editTrayForm" class="flex flex-col gap-3">
+      <div>
+        <label class="text-[12.5px] font-medium text-ink-soft">Crop / Seed Name</label>
+        <div class="mt-1">
+          <select id="editTrayVariety" class="w-full border border-line rounded-lg px-2.5 py-2 text-[13px] bg-white"></select>
+          <input id="editTrayCustomName" type="text" placeholder="Enter custom seed name…" class="hidden w-full border border-line rounded-lg px-2.5 py-2 text-[13px] bg-white mt-2">
+        </div>
+      </div>
+      <div><label class="text-[12.5px] font-medium text-ink-soft">Start Date (sowing day)</label><input id="editTrayDate" type="date" class="w-full border border-line rounded-lg px-3 py-2 mt-1 text-[13.5px]"></div>
+      <div>
+        <label class="text-[12.5px] font-medium text-ink-soft">Tray Size (Grid Dimensions)</label>
+        <div class="flex items-center gap-2 mt-1">
+          <input id="editTrayGridRows" type="number" min="1" max="50" placeholder="Rows" class="w-full border border-line rounded-lg px-3 py-2 text-[13.5px] font-mono">
+          <span class="text-ink-soft font-semibold">×</span>
+          <input id="editTrayGridCols" type="number" min="1" max="50" placeholder="Cols" class="w-full border border-line rounded-lg px-3 py-2 text-[13.5px] font-mono">
+        </div>
+        <div class="text-[11px] text-ink-soft mt-1">Total capacity: <span id="editTrayCalcCount" class="font-semibold text-forest font-mono">0</span> seedlings</div>
+      </div>
+      <button type="submit" class="mt-2 bg-forest text-white font-semibold text-[14px] py-2.5 rounded-lg">Save Changes</button>
+    </form>
   </div>
 </div>
 
-<div id="expenseModal" class="hidden fixed inset-0 z-[65] modal-backdrop flex items-end md:items-center justify-center p-0 md:p-4">
+<!-- (2026-07-13) Half-screen bottom modal for transplant with scrollable viewport; prev: max-h-[88vh] -->
+<div id="transplantModal" role="dialog" aria-modal="true" class="hidden fixed inset-0 z-[65] modal-backdrop flex items-end md:items-center justify-center p-0 md:p-4">
+  <div class="modal-panel bg-white w-full md:max-w-md rounded-t-3xl md:rounded-3xl p-4 md:p-5 max-h-[58vh] flex flex-col justify-between overflow-hidden">
+    <div class="flex items-center justify-between mb-1.5"><h3 class="font-display font-semibold text-[17px] text-forest" id="transplantModalTitle">Move to Tower</h3><button id="transplantModalClose" class="w-7 h-7 rounded-full bg-cream flex items-center justify-center" data-icon="x"></button></div>
+    <div class="flex-shrink-0">
+      <label class="text-[12px] font-medium text-ink-soft">Destination Tower</label>
+      <select id="transplantTowerSelect" class="w-full border border-line rounded-lg px-2.5 py-1.5 mt-0.5 mb-1 text-[13px] bg-white"></select>
+      <p id="transplantHint" class="text-[11.5px] text-ink-soft mb-1.5">Select empty pockets to move this batch into.</p>
+    </div>
+    <!-- Scrollable tower viewport -->
+    <div id="transplantDiagramContainer" class="my-1 mx-auto w-full flex-1 max-h-[220px] min-h-[140px] overflow-y-auto scrollbar-thin rounded-2xl border border-line p-2 bg-[#FAFCFA]"></div>
+    <div id="transplantPocketGrid" class="hidden"></div>
+    <button id="btnConfirmTransplant" class="w-full bg-forest text-white font-semibold text-[13.5px] py-2.5 rounded-lg mt-2 flex-shrink-0">Move Selected</button>
+  </div>
+</div>
+
+<div id="expenseModal" role="dialog" aria-modal="true" class="hidden fixed inset-0 z-[65] modal-backdrop flex items-end md:items-center justify-center p-0 md:p-4">
   <div class="modal-panel bg-white w-full md:max-w-sm rounded-t-3xl md:rounded-3xl p-5 md:p-6">
     <div class="flex items-center justify-between mb-4"><h3 class="font-display font-semibold text-[18px] text-forest">Add Expense</h3><button id="expenseModalClose" class="w-8 h-8 rounded-full bg-cream flex items-center justify-center" data-icon="x"></button></div>
     <form id="expenseForm" class="flex flex-col gap-3">
@@ -515,12 +741,44 @@
   </div>
 </div>
 
-<div id="harvestModal" class="hidden fixed inset-0 z-[65] modal-backdrop flex items-end md:items-center justify-center p-0 md:p-4">
+<!-- (2026-07-13) Add reservoir modal for pH, EC, solution temp, and water top-off; prev: none -->
+<div id="reservoirModal" role="dialog" aria-modal="true" class="hidden fixed inset-0 z-[65] modal-backdrop flex items-end md:items-center justify-center p-0 md:p-4">
+  <div class="modal-panel bg-white w-full md:max-w-md rounded-t-3xl md:rounded-3xl p-5 md:p-6 max-h-[88vh] overflow-y-auto scrollbar-thin">
+    <div class="flex items-center justify-between mb-3"><h3 class="font-display font-semibold text-[18px] text-forest">Log Reservoir & Water Top-off</h3><button id="reservoirModalClose" class="w-8 h-8 rounded-full bg-cream flex items-center justify-center" data-icon="x"></button></div>
+    <form id="reservoirForm" class="flex flex-col gap-3">
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-[12.5px] font-medium text-ink-soft">Current pH Level</label><input id="resPhInput" type="number" step="0.1" min="4" max="9" value="6.0" class="w-full border border-line rounded-lg px-3 py-2 text-[13.5px] font-mono"></div>
+        <div><label class="text-[12.5px] font-medium text-ink-soft">Target pH</label><input id="resTargetPhInput" type="number" step="0.1" min="4" max="9" value="6.0" class="w-full border border-line rounded-lg px-3 py-2 text-[13.5px] font-mono"></div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-[12.5px] font-medium text-ink-soft">Current EC (mS/cm)</label><input id="resEcInput" type="number" step="0.1" min="0" max="5" value="1.6" class="w-full border border-line rounded-lg px-3 py-2 text-[13.5px] font-mono"></div>
+        <div><label class="text-[12.5px] font-medium text-ink-soft">Target EC (mS/cm)</label><input id="resTargetEcInput" type="number" step="0.1" min="0" max="5" value="1.8" class="w-full border border-line rounded-lg px-3 py-2 text-[13.5px] font-mono"></div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-[12.5px] font-medium text-ink-soft">Water Temp (°C)</label><input id="resTempInput" type="number" step="0.5" min="5" max="45" value="22" class="w-full border border-line rounded-lg px-3 py-2 text-[13.5px] font-mono"></div>
+        <div><label class="text-[12.5px] font-medium text-ink-soft">Water Level (%)</label><input id="resWaterPctInput" type="number" step="5" min="0" max="100" value="85" class="w-full border border-line rounded-lg px-3 py-2 text-[13.5px] font-mono"></div>
+      </div>
+      <div><label class="text-[12.5px] font-medium text-ink-soft">Water Added / Top-off (Liters)</label><input id="resTopOffLitersInput" type="number" step="0.5" min="0" value="0" placeholder="0" class="w-full border border-line rounded-lg px-3 py-2 text-[13.5px] font-mono"></div>
+      
+      <!-- Automated Dosing Recommendation Box -->
+      <div id="resDosingCalcBox" class="bg-mint/40 border border-forest/20 rounded-xl p-3.5 text-[12px] flex flex-col gap-1 mt-1">
+        <div class="font-semibold text-forest">Automated Dosing Recommendation</div>
+        <div id="resDosingSuggestion" class="text-ink font-mono text-[12px]">pH & EC optimal · Add 0 mL Part A/B</div>
+      </div>
+
+      <button type="submit" class="mt-2 bg-forest text-white font-semibold text-[14px] py-2.5 rounded-lg">Save Log & Update Reservoir</button>
+    </form>
+  </div>
+</div>
+
+<div id="harvestModal" role="dialog" aria-modal="true" class="hidden fixed inset-0 z-[65] modal-backdrop flex items-end md:items-center justify-center p-0 md:p-4">
   <div class="modal-panel bg-white w-full md:max-w-sm rounded-t-3xl md:rounded-3xl p-5 md:p-6">
     <div class="flex items-center justify-between mb-4"><h3 class="font-display font-semibold text-[18px] text-forest">Log Harvest</h3><button id="harvestModalClose" class="w-8 h-8 rounded-full bg-cream flex items-center justify-center" data-icon="x"></button></div>
     <form id="harvestForm" class="flex flex-col gap-3">
       <div><label class="text-[12.5px] font-medium text-ink-soft">Variety</label><input id="harvestVariety" type="text" placeholder="e.g. Black Seeded Simpson" class="w-full border border-line rounded-lg px-3 py-2.5 mt-1 text-[14px]"></div>
       <div><label class="text-[12.5px] font-medium text-ink-soft">Grams Harvested</label><input id="harvestGrams" required type="number" min="0" step="1" placeholder="0" class="w-full border border-line rounded-lg px-3 py-2.5 mt-1 text-[14px] font-mono"></div>
+      <!-- (2026-07-13) Add market rate per kg for financial savings calculation; prev: hardcoded 500/kg -->
+      <div><label class="text-[12.5px] font-medium text-ink-soft">Market Rate (₱ / kg)</label><input id="harvestMarketRate" type="number" min="0" step="10" value="500" class="w-full border border-line rounded-lg px-3 py-2.5 mt-1 text-[14px] font-mono"></div>
       <button type="submit" class="mt-2 bg-forest text-white font-semibold text-[14px] py-2.5 rounded-lg">Save Harvest</button>
     </form>
   </div>
@@ -535,7 +793,7 @@
   <button id="btnSelectionCancel" class="text-white/70 p-1.5 flex-shrink-0" data-icon="x"></button>
 </div>
 
-<div id="bulkAssignModal" class="hidden fixed inset-0 z-[65] modal-backdrop flex items-end md:items-center justify-center p-0 md:p-4">
+<div id="bulkAssignModal" role="dialog" aria-modal="true" class="hidden fixed inset-0 z-[65] modal-backdrop flex items-end md:items-center justify-center p-0 md:p-4">
   <div class="modal-panel bg-white w-full md:max-w-sm rounded-t-3xl md:rounded-3xl p-5 md:p-6">
     <div class="flex items-center justify-between mb-1"><h3 class="font-display font-semibold text-[18px] text-forest">Assign Selected Pockets</h3><button id="bulkAssignModalClose" class="w-8 h-8 rounded-full bg-cream flex items-center justify-center" data-icon="x"></button></div>
     <p class="text-[12.5px] text-ink-soft mb-4"><span id="bulkAssignCount">0</span> pockets selected across the tower.</p>
@@ -554,10 +812,11 @@
   </div>
 </div>
 
+<div id="a11yLiveRegion" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
 <div id="toastContainer" class="fixed bottom-20 md:bottom-6 right-4 left-4 md:left-auto z-[75] flex flex-col gap-2 items-end pointer-events-none"></div>
 
 <!-- ============ CONFIRMATION MODAL ============ -->
-<div id="confirmModal" class="hidden fixed inset-0 z-[70] modal-backdrop flex items-center justify-center p-4">
+<div id="confirmModal" role="dialog" aria-modal="true" class="hidden fixed inset-0 z-[70] modal-backdrop flex items-center justify-center p-4">
   <div class="modal-panel bg-white w-full max-w-sm rounded-2xl p-5 shadow-xl">
     <div class="flex items-center gap-3 mb-4">
       <div class="w-10 h-10 rounded-full bg-clay/10 flex items-center justify-center flex-shrink-0 text-clay" data-icon="alert-circle"></div>

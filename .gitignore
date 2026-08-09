@@ -1,0 +1,22 @@
+# Node modules & build artifacts
+node_modules/
+www/
+dist/
+build/
+.cache/
+
+# Firebase admin credentials & private keys (prevent GitHub secret scanning block)
+*firebase-adminsdk*.json
+*.pem
+*.key
+
+# Android build outputs
+android/app/build/
+android/.gradle/
+android/build/
+android/captures/
+.gradle/
+
+# OS files
+.DS_Store
+Thumbs.db
