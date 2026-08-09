@@ -1134,6 +1134,9 @@ function renderTower(){
   updateSelectionVisuals();
   renderSelectionBar();
   renderTowerPhotoGallery();
+  
+  // Render Growth Gallery on Tower page
+  renderGrowthGallery('galleryStripTower');
 }
 
 // (2026-07-13) Constant 380px height, SVG arrow nav, Jan 1, 2020 date; prev: dynamic
@@ -1157,6 +1160,9 @@ function renderTowerPhotoGallery(){
 
   const log = (state.photoLog || []).filter(e=> !state.activeTowerId || e.towerId === state.activeTowerId);
   if(countEl) countEl.textContent = `${log.length} photo${log.length!==1?'s':''}`;
+
+  // Initialize multi-select state
+  if(!state.photoMultiSelect) state.photoMultiSelect = { active: false, selectedIds: [] };
 
   if(log.length === 0){
     grid.innerHTML='';
@@ -1224,13 +1230,19 @@ function renderTowerPhotoGallery(){
     const hasMore = log.length > limit;
 
     let html = '';
-    // (2026-07-13) Compact Google Drive style list row with 32px thumbnail; prev: card
+    // (2026-07-13) Compact Google Drive style list row with 32px thumbnail + multi-select support
     visible.forEach(e=>{
       const hc = healthColor[e.health] || '#22C55E';
       const hl = healthLabel[e.health] || 'Healthy';
       const formattedDate = formatLogDate(e.dateLabel || e.datePlanted);
-      html += `<div class="photo-log-card group flex items-center justify-between py-2 px-1.5 border-b border-line/30 hover:bg-cream/60 transition-colors cursor-pointer" data-photo-id="${e.id}">
+      const isSelected = state.photoMultiSelect.selectedIds.includes(e.id);
+      const checkboxHtml = state.photoMultiSelect.active ? `<div class="w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors ${isSelected ? 'bg-forest border-forest' : 'border-ink-soft/40 bg-white'}">
+        ${isSelected ? '<svg class="w-3 h-3 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>' : ''}
+      </div>` : '';
+      
+      html += `<div class="photo-log-item group flex items-center justify-between py-2 px-1.5 border-b border-line/30 hover:bg-cream/60 transition-colors cursor-pointer ${isSelected ? 'bg-forest/5' : ''}" data-photo-id="${e.id}">
         <div class="flex items-center gap-3 min-w-0 pr-2">
+          ${checkboxHtml}
           <img src="${e.dataUrl}" class="w-8 h-8 rounded-md object-cover flex-shrink-0 bg-black border border-line/40 shadow-xs" alt="${e.variety} photo" loading="lazy">
           <div class="min-w-0">
             <div class="text-[13px] font-semibold text-ink truncate leading-tight">${e.variety}</div>
@@ -1245,8 +1257,132 @@ function renderTowerPhotoGallery(){
     });
     listFeed.innerHTML = html;
 
-    listFeed.querySelectorAll('[data-photo-id]').forEach(card=>{
-      card.addEventListener('click', ()=>openPhotoDetailModal(card.dataset.photoId));
+    // Multi-select functionality with long press
+    let longPressTimer = null;
+    let touchStartY = 0;
+    let touchStartX = 0;
+    let lastSelectedId = null;
+    let isDraggingToSelect = false;
+    let hasMovedEnough = false;
+
+    listFeed.querySelectorAll('.photo-log-item').forEach(item=>{
+      const photoId = item.dataset.photoId;
+      
+      // Touch events for long press activation
+      item.addEventListener('touchstart', (e) => {
+        touchStartY = e.touches[0].clientY;
+        touchStartX = e.touches[0].clientX;
+        isDraggingToSelect = false;
+        hasMovedEnough = false;
+        
+        longPressTimer = setTimeout(() => {
+          // Long press triggered - activate drag-to-select
+          if(!hasMovedEnough){
+            if(!state.photoMultiSelect.active){
+              // First time activating multi-select
+              state.photoMultiSelect.active = true;
+              state.photoMultiSelect.selectedIds = [photoId];
+            }
+            // Enable dragging to select more items (works on subsequent long-presses too)
+            isDraggingToSelect = true;
+            renderTowerPhotoGallery();
+            renderPhotoMultiSelectBar();
+            // Haptic feedback if available
+            if(window.navigator && window.navigator.vibrate){
+              window.navigator.vibrate(50);
+            }
+          }
+        }, 500); // 500ms long press
+      });
+
+      item.addEventListener('touchmove', (e) => {
+        const currentY = e.touches[0].clientY;
+        const currentX = e.touches[0].clientX;
+        const scrollDistance = Math.abs(currentY - touchStartY);
+        const horizontalDistance = Math.abs(currentX - touchStartX);
+        
+        // User has moved enough to be considered scrolling
+        if(scrollDistance > 10 || horizontalDistance > 10){
+          hasMovedEnough = true;
+          
+          // Cancel long press timer if user is scrolling (not in multi-select mode yet)
+          if(!state.photoMultiSelect.active){
+            clearTimeout(longPressTimer);
+            return;
+          }
+        }
+        
+        // Only prevent scrolling if we're actively dragging to select in multi-select mode
+        if(state.photoMultiSelect.active && isDraggingToSelect){
+          e.preventDefault(); // Stop page scroll only when dragging to select
+          e.stopPropagation();
+          
+          // Find which item is under the touch
+          const touchedElement = document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY);
+          const touchedItem = touchedElement?.closest('.photo-log-item');
+          if(touchedItem && touchedItem.dataset.photoId){
+            const touchedId = touchedItem.dataset.photoId;
+            if(!state.photoMultiSelect.selectedIds.includes(touchedId)){
+              state.photoMultiSelect.selectedIds.push(touchedId);
+              renderTowerPhotoGallery();
+              renderPhotoMultiSelectBar();
+              // Small haptic on each selection
+              if(window.navigator && window.navigator.vibrate){
+                window.navigator.vibrate(10);
+              }
+            }
+          }
+        }
+      }, { passive: false }); // Important: passive: false to allow preventDefault
+
+      item.addEventListener('touchend', (e) => {
+        clearTimeout(longPressTimer);
+        
+        // If was dragging in multi-select mode, don't trigger click
+        if(isDraggingToSelect){
+          e.preventDefault();
+          isDraggingToSelect = false;
+          return;
+        }
+        isDraggingToSelect = false;
+        hasMovedEnough = false;
+      });
+
+      item.addEventListener('touchcancel', () => {
+        clearTimeout(longPressTimer);
+        isDraggingToSelect = false;
+        hasMovedEnough = false;
+      });
+
+      // Click handler
+      item.addEventListener('click', (e) => {
+        // Don't open photo if we were dragging
+        if(isDraggingToSelect){
+          e.preventDefault();
+          return;
+        }
+        
+        if(state.photoMultiSelect.active){
+          // Toggle selection
+          const idx = state.photoMultiSelect.selectedIds.indexOf(photoId);
+          if(idx > -1){
+            state.photoMultiSelect.selectedIds.splice(idx, 1);
+          } else {
+            state.photoMultiSelect.selectedIds.push(photoId);
+          }
+          renderTowerPhotoGallery();
+          renderPhotoMultiSelectBar();
+          
+          // Exit multi-select if no items selected
+          if(state.photoMultiSelect.selectedIds.length === 0){
+            state.photoMultiSelect.active = false;
+            renderTowerPhotoGallery();
+            renderPhotoMultiSelectBar();
+          }
+        } else {
+          openPhotoDetailModal(photoId);
+        }
+      });
     });
 
     if(hasMore && btnLoadMore){
@@ -1259,6 +1395,128 @@ function renderTowerPhotoGallery(){
       btnLoadMore?.classList.add('hidden');
     }
   }
+}
+
+// Multi-select action bar for photos
+function renderPhotoMultiSelectBar(){
+  let bar = document.getElementById('photoMultiSelectBar');
+  
+  if(!state.photoMultiSelect || !state.photoMultiSelect.active || state.photoMultiSelect.selectedIds.length === 0){
+    if(bar) bar.remove();
+    return;
+  }
+
+  const count = state.photoMultiSelect.selectedIds.length;
+  
+  if(!bar){
+    bar = document.createElement('div');
+    bar.id = 'photoMultiSelectBar';
+    bar.className = 'fixed bottom-20 md:bottom-6 left-1/2 -translate-x-1/2 bg-forest text-white rounded-2xl shadow-lg px-3 py-2.5 flex items-center gap-2 max-w-[94vw]';
+    bar.style.cssText = 'animation: slideUpIn 0.3s ease-out; z-index: 9999999;';
+    document.body.appendChild(bar);
+  }
+
+  bar.innerHTML = `
+    <button id="btnCancelMultiSelect" class="text-white/70 p-1.5 flex-shrink-0">
+      ${icon('x','w-4 h-4',16)}
+    </button>
+    <span class="text-[13px] font-semibold whitespace-nowrap flex-shrink-0">${count} selected</span>
+    <div class="w-px h-5 bg-white/20 flex-shrink-0"></div>
+    <button id="btnDeleteSelected" class="text-[12.5px] font-semibold bg-white/15 w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" aria-label="Delete selected">
+      ${icon('trash-2','w-4 h-4',16)}
+    </button>
+  `;
+
+  // Cancel button
+  bar.querySelector('#btnCancelMultiSelect').onclick = () => {
+    state.photoMultiSelect.active = false;
+    state.photoMultiSelect.selectedIds = [];
+    renderTowerPhotoGallery();
+    renderPhotoMultiSelectBar();
+  };
+
+  // Delete button
+  bar.querySelector('#btnDeleteSelected').onclick = () => {
+    // Show custom delete confirmation modal
+    showDeletePhotosModal(count, () => {
+      const idsToDelete = [...state.photoMultiSelect.selectedIds];
+      
+      // Delete from state
+      state.photoLog = (state.photoLog || []).filter(x => !idsToDelete.includes(x.id));
+      persist('photoLog');
+      
+      // Delete from Firestore
+      if(typeof cloudSync !== 'undefined' && cloudSync.connected){
+        idsToDelete.forEach(id => {
+          cloudSync.deletePhoto(id).catch(err => console.error('Photo delete error:', err));
+        });
+      }
+      
+      // Reset multi-select
+      state.photoMultiSelect.active = false;
+      state.photoMultiSelect.selectedIds = [];
+      
+      renderTowerPhotoGallery();
+      renderPhotoMultiSelectBar();
+      showToast(`Deleted ${count} photo${count !== 1 ? 's' : ''}`, 'clay', 'trash-2');
+    });
+  };
+}
+
+// Delete photos confirmation modal
+function showDeletePhotosModal(count, onConfirm){
+  let existing = document.getElementById('deletePhotosModal');
+  if(existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'deletePhotosModal';
+  modal.className = 'fixed inset-0 flex items-center justify-center p-4';
+  modal.style.cssText = 'background:rgba(15,25,20,0.95); backdrop-filter:blur(16px); opacity:0; transition:opacity 0.25s ease-out; z-index: 999999999 !important;';
+  
+  modal.innerHTML = `
+    <div class="bg-white w-full max-w-sm p-6 shadow-2xl relative" style="border-radius: 32px; animation: modalPopIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; z-index: 999999999 !important;">
+      <div class="flex items-center justify-center mb-4">
+        <div class="w-16 h-16 rounded-full bg-clay/10 flex items-center justify-center">
+          ${icon('trash-2','w-8 h-8 text-clay',32)}
+        </div>
+      </div>
+      
+      <h3 class="font-display font-bold text-[22px] text-forest text-center mb-2">Delete Photos?</h3>
+      <p class="text-[15px] text-ink-soft text-center mb-6 leading-relaxed">Are you sure you want to delete <strong class="text-ink">${count} photo${count !== 1 ? 's' : ''}</strong>? This action cannot be undone.</p>
+      
+      <div class="flex gap-3">
+        <button id="btnCancelDelete" class="flex-1 bg-cream hover:bg-cream-dark text-ink font-bold text-[15px] py-4 transition-colors" style="border-radius: 20px;">
+          Cancel
+        </button>
+        <button id="btnConfirmDelete" class="flex-1 bg-clay hover:bg-clay/90 text-white font-bold text-[15px] py-4 transition-colors active:scale-[0.98] shadow-lg" style="border-radius: 20px;">
+          Delete
+        </button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+  
+  // Fade in
+  requestAnimationFrame(() => {
+    modal.style.opacity = '1';
+  });
+
+  const closeModal = () => {
+    modal.style.opacity = '0';
+    setTimeout(() => modal.remove(), 200);
+  };
+
+  modal.querySelector('#btnCancelDelete').onclick = closeModal;
+  modal.querySelector('#btnConfirmDelete').onclick = () => {
+    closeModal();
+    onConfirm();
+  };
+  
+  // Close on backdrop click
+  modal.addEventListener('click', (e) => {
+    if(e.target === modal) closeModal();
+  });
 }
 
 // (2026-07-13) Immutable snapshot attributes for photo logs; prev: live compute
@@ -1858,27 +2116,23 @@ document.getElementById('galleryPhotoInput')?.addEventListener('change', (e)=>{
   progressModal.style.cssText = 'position:fixed !important; top:0 !important; left:0 !important; right:0 !important; bottom:0 !important; width:100vw !important; height:100vh !important; z-index:9999999 !important; background:rgba(20,30,24,0.75) !important; backdrop-filter:blur(12px) !important; opacity:0; transition:opacity 0.2s ease-out;';
   progressModal.className = 'flex items-center justify-center p-4';
   progressModal.innerHTML = `
-    <div class="bg-white rounded-2xl p-6 shadow-2xl max-w-[420px] w-full flex flex-col items-center text-center border border-line/20" style="animation: modalPopIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;">
-      <div id="photoUploadThumbnail" class="w-32 h-32 rounded-xl overflow-hidden mb-4 bg-cream border-2 border-line/30 flex items-center justify-center" style="min-height:128px; max-height:128px; min-width:128px; max-width:128px;">
-        <svg class="w-12 h-12 text-ink-soft/30" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <div class="bg-white rounded-2xl p-6 shadow-2xl max-w-[320px] w-full flex flex-col items-center text-center border border-line/20" style="animation: modalPopIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;">
+      <div id="photoUploadThumbnail" class="w-24 h-24 rounded-xl overflow-hidden mb-4 bg-cream border-2 border-line/30 flex items-center justify-center" style="min-height:96px; max-height:96px; min-width:96px; max-width:96px;">
+        <svg class="w-10 h-10 text-ink-soft/30" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
           <circle cx="8.5" cy="8.5" r="1.5"/>
           <polyline points="21 15 16 10 5 21"/>
         </svg>
       </div>
       <div id="photoUploadIconContainer" class="mb-3">
-        <svg class="animate-spin w-10 h-10 text-forest" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+        <svg class="animate-spin w-8 h-8 text-forest" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
           <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"></circle>
           <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
         </svg>
       </div>
-      <h3 id="photoUploadTitle" class="font-display font-bold text-[22px] text-forest leading-tight mb-3">Uploading Photos...</h3>
-      <p id="photoUploadSub" class="text-[14px] text-ink-soft/80 mb-6 leading-relaxed">Compressing and processing images</p>
-      <div class="w-full bg-cream/80 rounded-full h-2.5 mb-3 overflow-hidden shadow-inner border border-line/30">
-        <div id="photoUploadProgressBar" class="h-full bg-gradient-to-r from-forest via-leaf to-forest rounded-full" style="width:0%;"></div>
-      </div>
-      <div id="photoUploadProgressPct" class="text-center text-[15px] font-mono font-bold text-forest mb-6 tracking-wide">0%</div>
-      <button id="photoUploadOkBtn" type="button" class="w-full bg-forest hover:bg-forest/90 active:scale-[0.98] text-white font-bold text-[16px] py-4 rounded-2xl shadow-lg transition-all hidden">
+      <h3 id="photoUploadTitle" class="font-display font-bold text-[20px] text-forest leading-tight mb-2">Uploading Photos...</h3>
+      <p id="photoUploadSub" class="text-[13px] text-ink-soft/70 mb-5 leading-relaxed">Processing images</p>
+      <button id="photoUploadOkBtn" type="button" class="w-full bg-forest hover:bg-forest/90 active:scale-[0.98] text-white font-bold text-[17px] py-4 rounded-xl shadow-lg transition-all hidden">
         Okay
       </button>
     </div>
@@ -1890,8 +2144,8 @@ document.getElementById('galleryPhotoInput')?.addEventListener('change', (e)=>{
     progressModal.style.opacity = '1';
   });
 
-  const barEl = progressModal.querySelector('#photoUploadProgressBar');
-  const pctEl = progressModal.querySelector('#photoUploadProgressPct');
+  const barEl = null; // Progress bar removed
+  const pctEl = null; // Percentage removed
   const iconContainer = progressModal.querySelector('#photoUploadIconContainer');
   const titleEl = progressModal.querySelector('#photoUploadTitle');
   const subEl = progressModal.querySelector('#photoUploadSub');
@@ -1907,42 +2161,17 @@ document.getElementById('galleryPhotoInput')?.addEventListener('change', (e)=>{
 
   if(okBtn) okBtn.onclick = closeUploadModal;
 
-  // Track start time for animation timing
-  const uploadStartTime = Date.now();
-  
-  // Animate progress bar smoothly from 0 to 100% over 2.5 seconds
-  let currentProgress = 0;
-  const animationDuration = 2500; // 2.5 seconds total
-  const updateInterval = 30; // Update every 30ms for smooth animation
-  const totalSteps = animationDuration / updateInterval;
-  const progressIncrement = 100 / totalSteps;
-  
-  let progressAnimationInterval = setInterval(() => {
-    currentProgress += progressIncrement;
-    if(currentProgress >= 100) {
-      currentProgress = 100;
-      clearInterval(progressAnimationInterval);
-    }
-    
-    if(barEl){
-      barEl.style.width = `${currentProgress}%`;
-    }
-    if(pctEl){
-      pctEl.textContent = `${Math.floor(currentProgress)}%`;
-    }
-  }, updateInterval);
-  
-  // Process files with compression (happens in background while animation runs)
+  // Process files with compression (no fake animation delay)
   let processedCount = 0;
   const totalFiles = files.length;
 
   files.forEach(async (file, idx)=>{
     try {
-      // Show first image thumbnail
+      // Show first image thumbnail (with object-fit to prevent stretching)
       if(idx === 0 && thumbnailEl){
         const previewReader = new FileReader();
         previewReader.onload = (e) => {
-          thumbnailEl.innerHTML = `<img src="${e.target.result}" class="w-full h-full object-cover" style="min-height:128px; max-height:128px; min-width:128px; max-width:128px; object-position:center;" alt="upload preview">`;
+          thumbnailEl.innerHTML = `<img src="${e.target.result}" class="w-full h-full" style="object-fit:cover; object-position:center; min-height:96px; max-height:96px; min-width:96px; max-width:96px;" alt="upload preview">`;
         };
         previewReader.readAsDataURL(file);
       }
@@ -1981,33 +2210,19 @@ document.getElementById('galleryPhotoInput')?.addEventListener('change', (e)=>{
         cloudSync.syncPhoto(entry).catch(err => console.error('Photo sync error:', err));
       }
 
-      // When all files are done processing, wait for animation to finish then show success
+      // When all files are done processing, show success immediately
       if(processedCount === totalFiles){
-        // Wait for animation to reach 100% (or at least 2.5 seconds)
-        const waitTime = Math.max(0, 2500 - (Date.now() - uploadStartTime));
-        setTimeout(async () => {
-          // Clear animation interval if still running
-          if(progressAnimationInterval) clearInterval(progressAnimationInterval);
-          
-          // Ensure bar is at 100%
-          if(barEl) barEl.style.width = '100%';
-          if(pctEl) pctEl.textContent = '100%';
-          
-          // Small delay to show 100% before success state
-          await new Promise(resolve => setTimeout(resolve, 300));
-          
-          
-          if(state.photoLog.length > 100) state.photoLog = state.photoLog.slice(0,100);
-          persist('photoLog');
-          renderTowerPhotoGallery();
+        if(state.photoLog.length > 100) state.photoLog = state.photoLog.slice(0,100);
+        persist('photoLog');
+        renderTowerPhotoGallery();
 
-          // Success state
+        // Success state
         if(thumbnailEl){
-          thumbnailEl.className = 'w-32 h-32 rounded-xl overflow-hidden mb-4 bg-forest/10 border-2 border-forest/30 flex items-center justify-center relative';
-          thumbnailEl.style.cssText = 'min-height:128px; max-height:128px; min-width:128px; max-width:128px;';
+          thumbnailEl.className = 'w-24 h-24 rounded-xl overflow-hidden mb-4 bg-forest/10 border-2 border-forest/30 flex items-center justify-center relative';
+          thumbnailEl.style.cssText = 'min-height:96px; max-height:96px; min-width:96px; max-width:96px;';
           const checkIcon = document.createElement('div');
           checkIcon.className = 'absolute inset-0 bg-forest/90 flex items-center justify-center';
-          checkIcon.innerHTML = `<svg class="w-16 h-16 text-white" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+          checkIcon.innerHTML = `<svg class="w-12 h-12 text-white" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
           thumbnailEl.appendChild(checkIcon);
         }
         if(iconContainer){
@@ -2015,15 +2230,12 @@ document.getElementById('galleryPhotoInput')?.addEventListener('change', (e)=>{
           iconContainer.style.display = 'none';
         }
         if(titleEl){
-          titleEl.className = 'font-display font-bold text-[22px] text-forest leading-tight mb-3';
+          titleEl.className = 'font-display font-bold text-[20px] text-forest leading-tight mb-2';
           titleEl.innerHTML = `<span style="display:inline-block; margin-right:8px;">✓</span>Upload Successful!`;
         }
         if(subEl){
-          subEl.className = 'text-[14px] text-ink-soft/70 mb-6 leading-relaxed';
+          subEl.className = 'text-[13px] text-ink-soft/70 mb-5 leading-relaxed';
           subEl.textContent = 'Photo saved to Tower Growth History';
-        }
-        if(pctEl){
-          pctEl.style.display = 'block';
         }
         if(okBtn){
           okBtn.classList.remove('hidden');
@@ -2034,9 +2246,8 @@ document.getElementById('galleryPhotoInput')?.addEventListener('change', (e)=>{
 
         autoCloseTimer = setTimeout(()=>{
           closeUploadModal();
-        }, 3000);
-        }, waitTime); // Close setTimeout
-      } // Close if processedCount === totalFiles
+        }, 2500);
+      }
     } catch(err){
       console.error('Image compression failed:', err);
       processedCount++;

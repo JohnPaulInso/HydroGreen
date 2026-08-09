@@ -495,3 +495,36 @@ body.a11y-reduce-motion *, body.a11y-reduce-motion *::before, body.a11y-reduce-m
   box-shadow: 0 0 0 2px rgba(239,68,68,0.35) !important;
   opacity: 0.8 !important;
 }
+
+/* Multi-select action bar animation */
+@keyframes slideUpIn {
+  0% { 
+    transform: translateY(100%); 
+    opacity: 0; 
+  }
+  100% { 
+    transform: translateY(0); 
+    opacity: 1; 
+  }
+}
+
+/* Smooth checkbox transition */
+.photo-log-item {
+  transition: background-color 0.2s ease, transform 0.1s ease;
+}
+
+.photo-log-item:active {
+  transform: scale(0.98);
+}
+
+/* Delete photos modal animation */
+@keyframes modalSlideUp {
+  0% { 
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  100% { 
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
