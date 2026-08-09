@@ -8,7 +8,9 @@
 const KEYS = {
   rows:'ht_rows', pockets:'ht_pockets', trays:'ht_trays', expenses:'ht_expenses',
   harvests:'ht_harvests', settings:'ht_settings', completed:'ht_completed',
-  alertLog:'ht_alertlog', meta:'ht_meta', towers:'ht_towers', activeTower:'ht_active_tower', reservoir:'ht_reservoir'
+  alertLog:'ht_alertlog', meta:'ht_meta', towers:'ht_towers', activeTower:'ht_active_tower', reservoir:'ht_reservoir',
+  // (2026-07-13) Add photoLog key for tower-wide growth photo history; prev: none
+  photoLog:'ht_photo_log'
 };
 
 // (2026-07-13) Expand CROP_PRESETS with popular hydroponic seeds; prev: 8 presets
@@ -144,6 +146,62 @@ function stageIndex(key){ return STAGES.findIndex(s=>s.key===key); }
 function fmtPeso(n){ return Math.round(n).toLocaleString('en-PH'); }
 function fmtDate(iso){ if(!iso) return '—'; return new Date(iso+'T00:00:00').toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'}); }
 
+/* ---- Image compression for Firebase (fixes "invalid nested entity" error) ---- */
+function compressImage(file, maxWidth = 1200, quality = 0.8) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+
+        // Scale down if larger than maxWidth
+        if (width > maxWidth) {
+          height = (height * maxWidth) / width;
+          width = maxWidth;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+
+        // Convert to JPEG with quality compression
+        canvas.toBlob(
+          (blob) => {
+            if(!blob){ reject(new Error('Compression failed')); return; }
+            const compressedReader = new FileReader();
+            compressedReader.onload = () => resolve(compressedReader.result);
+            compressedReader.onerror = reject;
+            compressedReader.readAsDataURL(blob);
+          },
+          'image/jpeg',
+          quality
+        );
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+// Calculate file size from base64 data URL
+function getFileSizeFromDataUrl(dataUrl) {
+  if(!dataUrl) return '0 KB';
+  // Remove data URL prefix to get base64 string
+  const base64 = dataUrl.split(',')[1] || '';
+  // Calculate actual size (base64 is ~4/3 of original)
+  const sizeBytes = (base64.length * 3) / 4;
+  
+  if (sizeBytes < 1024) return `${sizeBytes.toFixed(0)} B`;
+  if (sizeBytes < 1024 * 1024) return `${(sizeBytes / 1024).toFixed(1)} KB`;
+  return `${(sizeBytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
 function getPocketState(p){
   if(!p.variety) return { status:'empty', stage:null, day:0 };
   const day = Math.max(1, dayOfCycle(p.datePlanted));
@@ -178,6 +236,8 @@ let state = {
   completed: store.get(KEYS.completed, {}),
   alertLog: store.get(KEYS.alertLog, []),
   meta: store.get(KEYS.meta, { firstPlantPrompted:false }),
+  // (2026-07-13) Tower-wide photo history log; prev: per-plant p.photo only
+  photoLog: store.get(KEYS.photoLog, []),
   reservoir: store.get(KEYS.reservoir, { ph:6.0, targetPh:6.0, ec:1.6, targetEc:1.8, tempC:22, waterPct:85, capacityLiters:30, history:[] })
 };
 // Ensure all rows have a towerId assigned
@@ -203,7 +263,7 @@ function persist(part){
   store.set(KEYS[part], state[part]);
   if(typeof cloudSync!=='undefined' && cloudSync.connected && !cloudSync.applyingRemote) cloudSync.pushDebounced();
 }
-// (2026-07-13) High-contrast dark undo snackbar with explicit inline styles; prev: white background conflict
+// (2026-07-13) White bg undo snackbar with text line break; prev: dark bg
 let activeUndoTimer = null;
 let activeUndoInterval = null;
 function triggerUndoSnackbar(message, restoreFn){
@@ -214,14 +274,14 @@ function triggerUndoSnackbar(message, restoreFn){
 
   const snackbar = document.createElement('div');
   snackbar.id = 'undoSnackbar';
-  snackbar.style.cssText = 'position:fixed; bottom:max(5.5rem, calc(4.5rem + env(safe-area-inset-bottom))); left:50%; transform:translateX(-50%); z-index:99999; background-color:#14261C !important; color:#FFFFFF !important; padding:12px 18px; border-radius:18px; box-shadow:0 10px 25px rgba(0,0,0,0.35); display:flex; align-items:center; justify-content:space-between; gap:16px; font-size:13.5px; font-weight:600; border:2px solid #2F9E5B; max-width:92vw; min-width:300px;';
+  snackbar.style.cssText = 'position:fixed; bottom:max(5.5rem, calc(4.5rem + env(safe-area-inset-bottom))); left:50%; transform:translateX(-50%); z-index:99999; background-color:#FFFFFF !important; color:#0F172A !important; padding:10px 14px; border-radius:16px; box-shadow:0 10px 25px rgba(0,0,0,0.18); display:flex; align-items:center; justify-content:space-between; gap:12px; font-size:12px; font-weight:600; border:1.5px solid #CBD5E1; max-width:88vw; min-width:280px;';
   
   let seconds = 5;
   snackbar.innerHTML = `
-    <span style="color:#FFFFFF !important; font-size:13.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${message}</span>
-    <button id="btnUndoAction" type="button" style="background-color:#2F9E5B !important; color:#FFFFFF !important; font-size:12.5px; font-weight:700; padding:7px 14px; border-radius:12px; border:1px solid rgba(255,255,255,0.3); cursor:pointer; display:flex; align-items:center; gap:8px; flex-shrink:0; box-shadow:0 2px 6px rgba(0,0,0,0.2);">
+    <span style="color:#0F172A !important; font-size:12px; font-weight:600; word-break:break-word; white-space:normal; line-height:1.35; flex:1; min-width:0;">${message}</span>
+    <button id="btnUndoAction" type="button" style="background-color:#166534 !important; color:#FFFFFF !important; font-size:11.5px; font-weight:700; padding:6px 12px; border-radius:10px; border:none; cursor:pointer; display:flex; align-items:center; gap:6px; flex-shrink:0; box-shadow:0 2px 6px rgba(0,0,0,0.12);">
       <span style="color:#FFFFFF !important;">Undo</span>
-      <span id="undoCountdown" style="background-color:rgba(255,255,255,0.25) !important; color:#FFFFFF !important; font-family:monospace; font-weight:700; font-size:11px; padding:2px 6px; border-radius:6px;">5s</span>
+      <span id="undoCountdown" style="background-color:rgba(255,255,255,0.3) !important; color:#FFFFFF !important; font-family:monospace; font-weight:700; font-size:10.5px; padding:1.5px 5px; border-radius:5px;">5s</span>
     </button>
   `;
 
@@ -278,9 +338,28 @@ function showFirstPlantBanner(){
 }
 
 /* ================= NAVIGATION ================= */
+// (2026-07-13) Fast subtle page fade-out fade-in transition; prev: instant toggle
 function showPage(name, opts){
-  document.querySelectorAll('.page').forEach(p=>p.classList.add('hidden'));
-  const pageEl = document.getElementById('page-'+name);
+  const activePage = document.querySelector('.page:not(.hidden)');
+  const targetPage = document.getElementById('page-'+name);
+  if(!targetPage) return;
+
+  if(activePage && activePage !== targetPage && !opts?.instant){
+    activePage.classList.add('page-exit');
+    setTimeout(()=>{
+      activePage.classList.remove('page-exit');
+      activePage.classList.add('hidden');
+      performPageSwitch(name, targetPage, opts);
+    }, 60);
+  } else {
+    performPageSwitch(name, targetPage, opts);
+  }
+}
+
+// (2026-07-13) Save active page in localStorage for page reload; prev: default dashboard
+function performPageSwitch(name, pageEl, opts){
+  try { localStorage.setItem('ht_active_page', name); } catch(e){}
+  document.querySelectorAll('.page').forEach(p=>{ if(p!==pageEl) p.classList.add('hidden'); });
   pageEl.classList.remove('hidden');
   document.querySelectorAll('.nav-btn').forEach(b=>{
     const active = b.dataset.page===name;
@@ -294,8 +373,6 @@ function showPage(name, opts){
   });
   renderPage(name);
   window.scrollTo({top:0,behavior:'instant'});
-  // Move focus to the new page's heading for screen-reader/keyboard users,
-  // but skip it on the very first automatic load so focus doesn't jump on landing.
   if(opts?.fromNav){
     const heading = pageEl.querySelector('h1');
     if(heading){ heading.setAttribute('tabindex','-1'); heading.focus({preventScroll:true}); }
@@ -318,22 +395,41 @@ function renderPage(name){
   if(name==='tools') renderTools();
 }
 
-/* ================= TOASTS ================= */
+// (2026-07-13) Define MAX_TOASTS constant for showToast; prev: undefined variable
 const MAX_TOASTS = 3;
-function showToast(msg, tone='forest', iconName='info'){
+
+function showToast(msg, tone='forest', iconName='info', opts){
   const wrap = document.getElementById('toastContainer');
+  if(!wrap) return;
   announce(msg.replace(/<[^>]+>/g,''));
-  // Remove oldest toast if we've hit the limit
   const existingToasts = wrap.querySelectorAll('.toast');
   if(existingToasts.length >= MAX_TOASTS){
     existingToasts[0].remove();
   }
   const el = document.createElement('div');
   const bg = { forest:'bg-forest', clay:'bg-clay', gold:'bg-gold' }[tone] || 'bg-forest';
-  el.className = `toast ${bg} text-white text-[13px] font-medium px-4 py-3 rounded-xl shadow-lg flex items-center gap-2 max-w-sm pointer-events-auto`;
-  el.innerHTML = `${icon(iconName,'w-4 h-4 flex-shrink-0',16)}<span>${msg}</span>`;
+  el.className = `toast ${bg} text-white text-[13px] font-medium px-4 py-3 rounded-xl shadow-lg flex items-center justify-between gap-3 max-w-sm pointer-events-auto`;
+  
+  let actionHtml = '';
+  if(opts && opts.actionLabel){
+    actionHtml = `<button id="toastActionBtn" type="button" class="ml-2 bg-white/20 hover:bg-white/35 active:scale-95 text-white font-semibold text-[11.5px] px-2.5 py-1 rounded-lg transition-all underline flex-shrink-0">${opts.actionLabel}</button>`;
+  }
+
+  el.innerHTML = `<div class="flex items-center gap-2 min-w-0">${icon(iconName,'w-4 h-4 flex-shrink-0',16)}<span class="truncate">${msg}</span></div>${actionHtml}`;
   wrap.appendChild(el);
-  setTimeout(()=>{ el.style.opacity='0'; el.style.transform='translateX(16px)'; el.style.transition='.25s'; setTimeout(()=>el.remove(),260); }, 3800);
+
+  if(opts && opts.onAction){
+    const btn = el.querySelector('#toastActionBtn');
+    if(btn){
+      btn.onclick = (ev) => {
+        ev.stopPropagation();
+        el.remove();
+        opts.onAction();
+      };
+    }
+  }
+
+  setTimeout(()=>{ el.style.opacity='0'; el.style.transform='translateX(16px)'; el.style.transition='.25s'; setTimeout(()=>el.remove(),260); }, 4500);
 }
 
 /* ================= CONFIRMATION MODAL ================= */
@@ -439,6 +535,23 @@ function renderDashboard(){
   document.getElementById('statSpent').textContent = fmtPeso(totalSpent);
   document.getElementById('statROI').textContent = roi.toFixed(1);
 
+  // (2026-07-13) Show rain warning banner on dashboard when rain prob > 50%; prev: none
+  const rainBanner = document.getElementById('dashboardWeatherRainBanner');
+  if(rainBanner){
+    const lw = (typeof weatherService !== 'undefined') ? weatherService.lastWeather : null;
+    const precipProb = lw?.daily?.precipitationProbMax?.[0] || 0;
+    const isRainy = (state.settings?.rainAlert !== false) && (precipProb > 50 || lw?.current?.precipitation > 0);
+    if(isRainy && !sessionStorage.getItem('dismiss_rain_banner')){
+      rainBanner.classList.remove('hidden');
+      document.getElementById('btnDismissRainBanner')?.addEventListener('click', ()=>{
+        sessionStorage.setItem('dismiss_rain_banner', '1');
+        rainBanner.classList.add('hidden');
+      });
+    } else {
+      rainBanner.classList.add('hidden');
+    }
+  }
+
   const tasks = computeTasks();
   const today = todayISO();
   const listEl = document.getElementById('taskList');
@@ -497,6 +610,7 @@ function renderDashboard(){
   document.getElementById('firstPlantPrompt')?.classList.toggle('hidden', state.meta.firstPlantPrompted!==true || state.settings.browserNotifs);
 }
 
+// (2026-07-13) Show stage modal on Growth Gallery click; prev: STAGE_DESCRIPTIONS error
 function renderGrowthGallery(containerId){
   const gallery = document.getElementById(containerId);
   if(!gallery) return;
@@ -505,11 +619,46 @@ function renderGrowthGallery(containerId){
     const key = meta.key;
     const card = document.createElement('button');
     card.type = 'button';
-    card.className = 'flex flex-col items-center text-center bg-cream hover:bg-mint rounded-xl p-2 transition-colors';
-    card.innerHTML = `${plantIcon(key, 40)}<span class="text-[10px] font-semibold text-ink-soft mt-1 leading-tight">${meta.label.split(' ')[0]}</span>`;
-    card.addEventListener('click', ()=>showToast(`<strong>${meta.label}</strong> (Day ${meta.range[0]}${meta.range[1]>900?'+':'–'+meta.range[1]}) — ${STAGE_DESCRIPTIONS[key]}`, 'forest', 'info'));
+    // (2026-07-13) Center content vertically inside stage cards; prev: justify-between
+    card.className = 'flex flex-col items-center justify-center text-center bg-cream hover:bg-mint/80 rounded-xl p-3 sm:p-3.5 transition-all border border-transparent hover:border-leaf/30 shadow-xs cursor-pointer';
+    const dayText = meta.range[1]>900 ? `Day ${meta.range[0]}+` : `Day ${meta.range[0]}-${meta.range[1]}`;
+    card.innerHTML = `${plantIcon(key, 36)}<div class="mt-1.5"><div class="text-[10.5px] font-semibold text-ink leading-tight">${meta.label.split(' ')[0]}</div><div style="font-size:7.5px !important; line-height:1 !important; font-weight:600; color:#64748B !important; margin-top:2px;">${dayText}</div></div>`;
+    card.addEventListener('click', ()=>openStageDetailModal(meta));
     gallery.appendChild(card);
   });
+}
+
+function openStageDetailModal(meta){
+  let existing = document.getElementById('stageDetailModal');
+  if(existing) existing.remove();
+  const dayStr = meta.range[1]>900 ? `Day ${meta.range[0]}+` : `Day ${meta.range[0]} – ${meta.range[1]}`;
+  const modal = document.createElement('div');
+  modal.id = 'stageDetailModal';
+  modal.setAttribute('role','dialog');
+  modal.setAttribute('aria-modal','true');
+  modal.className = 'fixed inset-0 z-[75] modal-backdrop flex items-end md:items-center justify-center p-0 md:p-4';
+  modal.innerHTML = `
+    <div class="modal-panel bg-white w-full md:max-w-sm rounded-t-3xl md:rounded-3xl p-5 md:p-6 shadow-2xl">
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-3">
+          <div class="p-2.5 rounded-xl bg-mint/50 border border-leaf/30">${plantIcon(meta.key, 40)}</div>
+          <div>
+            <h3 class="font-display font-bold text-[17px] text-forest leading-tight">${meta.label}</h3>
+            <span class="text-[11px] font-semibold font-mono text-forest bg-mint px-2.5 py-0.5 rounded-full inline-block mt-0.5">${dayStr}</span>
+          </div>
+        </div>
+        <button id="stageDetailClose" class="w-8 h-8 rounded-full bg-cream hover:bg-cream-dark flex items-center justify-center text-ink-soft font-bold text-[14px]">✕</button>
+      </div>
+      <div class="bg-cream/60 rounded-2xl p-4 border border-line/60 mb-4">
+        <div class="text-[11px] font-semibold text-ink-soft uppercase tracking-wider mb-1">Stage Care & Instructions</div>
+        <p class="text-[13px] text-ink font-medium leading-relaxed">${meta.note}</p>
+      </div>
+      <button id="stageDetailDone" class="w-full bg-forest text-white font-semibold text-[13.5px] py-2.5 rounded-xl shadow-sm">Got It</button>
+    </div>`;
+  document.body.appendChild(modal);
+  document.getElementById('stageDetailClose').onclick = ()=>modal.remove();
+  document.getElementById('stageDetailDone').onclick = ()=>modal.remove();
+  modal.addEventListener('click', ev=>{ if(ev.target===modal) modal.remove(); });
 }
 
 /* ================= TOWER (rows x columns) ================= */
@@ -543,15 +692,20 @@ function pocketAriaLabel(id){
   const {stage, day} = getPocketState(p);
   return `Pocket ${id}, ${p.variety}, ${stage.label}, day ${day}`;
 }
-// (2026-07-13) Fix pocket hit area with SVG fill-opacity; prev: fill="transparent"
+// (2026-07-13) Render health status outline rings on visualizer SVG pots; prev: static stroke
 function potCup(id, ax, ay, nx, ny, status, stageKey){
   const ring = `<circle class="pocket-select-ring" cx="${ax}" cy="${ay+9}" r="19" fill="none" stroke="#E8A33D" stroke-width="3.5" opacity="0"/>`;
   const iconR = 12;
   const hitCircle = `<circle cx="${ax}" cy="${ay+9}" r="24" fill="#000000" fill-opacity="0"/>`;
+  const pData = state.pockets.find(p=>String(p.id)===String(id));
+  const health = pData ? (pData.health || 'healthy') : 'healthy';
+  const isOccupied = pData && pData.variety;
+  const strokeColor = !isOccupied ? '#E3E9E3' : (health === 'unhealthy' ? '#F59E0B' : (health === 'dead' ? '#EF4444' : '#22C55E'));
+  const strokeW = isOccupied ? '2.5' : '1.5';
   return `<g class="tower-pocket" data-pocket-id="${id}" data-status="${status}" tabindex="0" role="button" aria-label="${pocketAriaLabel(id)}">${hitCircle}
     <line x1="${nx}" y1="${ny}" x2="${ax}" y2="${ay+8}" stroke="#C7D1CA" stroke-width="5" stroke-linecap="round"/>
     <path d="M${ax-15} ${ay+8} Q${ax-16} ${ay+24} ${ax} ${ay+26} Q${ax+16} ${ay+24} ${ax+15} ${ay+8} Z" fill="url(#pipeGrad)" stroke="#C2CCC5" stroke-width="1.5"/>
-    <circle cx="${ax}" cy="${ay+9}" r="${iconR+2}" fill="#FFFFFF" stroke="#E3E9E3" stroke-width="1"/>
+    <circle cx="${ax}" cy="${ay+9}" r="${iconR+2}" fill="#FFFFFF" stroke="${strokeColor}" stroke-width="${strokeW}"/>
     <g transform="translate(${ax-iconR},${ay+9-iconR}) scale(${(iconR*2)/100})">${plantIconInner(stageKey)}</g>
     ${ring}
   </g>`;
@@ -612,9 +766,14 @@ function channelPot(id, x, channelTopY, status, stageKey){
   const r = 15, iconR = 12;
   const ring = `<circle class="pocket-select-ring" cx="${x}" cy="${channelTopY}" r="${r+5}" fill="none" stroke="#E8A33D" stroke-width="3.5" opacity="0"/>`;
   const hitCircle = `<circle cx="${x}" cy="${channelTopY}" r="${r+8}" fill="#000000" fill-opacity="0"/>`;
+  const pData = state.pockets.find(p=>String(p.id)===String(id));
+  const health = pData ? (pData.health || 'healthy') : 'healthy';
+  const isOccupied = pData && pData.variety;
+  const strokeColor = !isOccupied ? '#C2CCC5' : (health === 'unhealthy' ? '#F59E0B' : (health === 'dead' ? '#EF4444' : '#22C55E'));
+  const strokeW = isOccupied ? '2.5' : '1.5';
   return `<g class="tower-pocket" data-pocket-id="${id}" data-status="${status}" tabindex="0" role="button" aria-label="${pocketAriaLabel(id)}">${hitCircle}
     <ellipse cx="${x}" cy="${channelTopY+3}" rx="${r+2}" ry="${(r+2)*0.55}" fill="#00000014"/>
-    <circle cx="${x}" cy="${channelTopY}" r="${r}" fill="#FFFFFF" stroke="#C2CCC5" stroke-width="1.5"/>
+    <circle cx="${x}" cy="${channelTopY}" r="${r}" fill="#FFFFFF" stroke="${strokeColor}" stroke-width="${strokeW}"/>
     <circle cx="${x}" cy="${channelTopY}" r="${iconR}" fill="#FBFCFA"/>
     <g transform="translate(${x-iconR+1},${channelTopY-iconR+1}) scale(${(iconR*2-2)/100})">${plantIconInner(stageKey)}</g>
     ${ring}
@@ -942,15 +1101,17 @@ function renderTower(){
     const card = document.createElement('div');
     card.className = 'bg-white rounded-2xl shadow-card border border-line p-4 md:p-5 flex flex-col gap-3';
     card.innerHTML = `
-      <button data-row-select="${row.id}" class="w-full flex items-center justify-between text-left group">
-        <div class="flex items-center gap-3">
+      <!-- (2026-07-13) Add Fill Tier bulk plant button on row card header; prev: text only -->
+      <div class="w-full flex items-center justify-between">
+        <button data-row-select="${row.id}" class="flex-1 flex items-center gap-3 text-left group">
           <span class="w-10 h-10 rounded-2xl bg-mint text-forest flex items-center justify-center flex-shrink-0">${icon('layers','w-5 h-5',20)}</span>
           <div>
             <div class="font-semibold text-[15px] text-ink">${rowLabel(row)} <span class="text-ink-soft font-normal text-[13px]">· ${pockets.length} pockets</span></div>
             <div class="text-[12.5px] text-ink-soft mt-0.5">${rowSummary(row)}</div>
           </div>
-        </div>
-      </button>
+        </button>
+        <button data-row-fill="${row.id}" class="text-[12px] font-semibold text-forest bg-mint hover:bg-mint/80 px-3 py-1.5 rounded-xl transition-colors flex items-center gap-1 flex-shrink-0 shadow-xs">${icon('layers','w-3.5 h-3.5',14)} Fill Tier</button>
+      </div>
       <div class="flex gap-3 overflow-x-auto scrollbar-thin py-1">
         ${pockets.map(p=>pocketChipHTML(p)).join('')}
       </div>`;
@@ -964,6 +1125,7 @@ function renderTower(){
   list.appendChild(addCard);
 
   list.querySelectorAll('[data-row-select]').forEach(btn=>btn.addEventListener('click', ()=>openRowModal(btn.dataset.rowSelect)));
+  list.querySelectorAll('[data-row-fill]').forEach(btn=>btn.addEventListener('click', ()=>openRowModal(btn.dataset.rowFill)));
   list.querySelectorAll('[data-pocket-chip]').forEach(btn=>btn.addEventListener('click', (e)=>{
     e.stopPropagation();
     if(selectionState.active) toggleSelect(Number(btn.dataset.pocketChip), !selectionState.ids.has(Number(btn.dataset.pocketChip)));
@@ -971,13 +1133,925 @@ function renderTower(){
   }));
   updateSelectionVisuals();
   renderSelectionBar();
+  renderTowerPhotoGallery();
 }
+
+// (2026-07-13) Constant 380px height, SVG arrow nav, Jan 1, 2020 date; prev: dynamic
+function formatLogDate(dateStr){
+  if(!dateStr || dateStr === '—') return '—';
+  const d = new Date(dateStr);
+  if(isNaN(d.getTime())) return dateStr;
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function renderTowerPhotoGallery(){
+  const grid = document.getElementById('towerPhotoGalleryGrid');
+  const listFeed = document.getElementById('towerPhotoGalleryList');
+  const btnLoadMore = document.getElementById('btnLoadMorePhotos');
+  const empty = document.getElementById('towerPhotoGalleryEmpty');
+  const countEl = document.getElementById('photoLogCount');
+  const btnGrid = document.getElementById('btnPhotoViewGrid');
+  const btnList = document.getElementById('btnPhotoViewList');
+
+  if(!grid) return;
+
+  const log = (state.photoLog || []).filter(e=> !state.activeTowerId || e.towerId === state.activeTowerId);
+  if(countEl) countEl.textContent = `${log.length} photo${log.length!==1?'s':''}`;
+
+  if(log.length === 0){
+    grid.innerHTML='';
+    if(listFeed) listFeed.innerHTML='';
+    grid.classList.add('hidden');
+    listFeed?.classList.add('hidden');
+    btnLoadMore?.classList.add('hidden');
+    empty?.classList.remove('hidden');
+    return;
+  }
+  empty?.classList.add('hidden');
+
+  const viewMode = state.photoViewMode || 'grid';
+  if(btnGrid && btnList){
+    btnGrid.className = viewMode === 'grid' ? 'px-2.5 py-1 rounded-lg text-[11.5px] font-semibold bg-white text-forest shadow-xs border border-line/40 transition-all' : 'px-2.5 py-1 rounded-lg text-[11.5px] font-semibold text-ink-soft hover:text-forest bg-transparent transition-all';
+    btnList.className = viewMode === 'list' ? 'px-2.5 py-1 rounded-lg text-[11.5px] font-semibold bg-white text-forest shadow-xs border border-line/40 transition-all' : 'px-2.5 py-1 rounded-lg text-[11.5px] font-semibold text-ink-soft hover:text-forest bg-transparent transition-all';
+
+    btnGrid.onclick = () => { state.photoViewMode = 'grid'; renderTowerPhotoGallery(); };
+    btnList.onclick = () => { state.photoViewMode = 'list'; renderTowerPhotoGallery(); };
+  }
+
+  const healthColor = { healthy:'#22C55E', unhealthy:'#F59E0B', dead:'#EF4444' };
+  const healthLabel = { healthy:'Healthy', unhealthy:'Unhealthy', dead:'Dead' };
+
+  if(viewMode === 'grid'){
+    listFeed?.classList.add('hidden');
+    btnLoadMore?.classList.add('hidden');
+    grid.classList.remove('hidden');
+
+    const MAX_VISIBLE = 9;
+    const visible = log.slice(0, MAX_VISIBLE);
+    const overflow = log.length - MAX_VISIBLE;
+
+    let html = '';
+    visible.forEach((e, i)=>{
+      const isLastAndHasMore = i === MAX_VISIBLE - 1 && overflow > 0;
+      const overflowLabel = overflow >= 99 ? '99+' : `+${overflow}`;
+      // (2026-07-13) Object-cover & dark bottom gradient on grid tiles; prev: fit stretch
+      html += `<div class="photo-log-card group relative cursor-pointer rounded-2xl overflow-hidden bg-black shadow-sm border border-line/20 aspect-square" data-photo-id="${e.id}">
+        <img src="${e.dataUrl}" style="width:100% !important; height:100% !important; object-fit:cover !important;" class="block ${isLastAndHasMore?'brightness-50':'group-hover:scale-105 transition-transform duration-300'}" alt="${e.variety} photo" loading="lazy">
+        // (2026-07-13) Soft gradient & z-20 pure white text overlay; prev: dark covered
+        ${isLastAndHasMore ? `
+          <div class="absolute inset-0 flex flex-col items-center justify-center text-white pointer-events-none bg-black/40 z-20">
+            <div class="font-display font-bold text-[28px] leading-none">${overflowLabel}</div>
+            <div class="text-[11px] font-medium opacity-80 mt-1">more photos</div>
+          </div>` : `
+          <div style="position:absolute !important; bottom:0 !important; left:0 !important; right:0 !important; width:100% !important; height:50% !important; background:linear-gradient(to top, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.3) 60%, rgba(0,0,0,0) 100%) !important; pointer-events:none !important; z-index:5 !important;"></div>
+          <div class="absolute inset-x-0 bottom-0 p-2 text-white pointer-events-none w-full overflow-hidden" style="z-index:20 !important;">
+            <div class="font-bold truncate text-white" style="font-size:10px !important; line-height:1.15; color:#FFFFFF !important; text-shadow:0 1px 3px rgba(0,0,0,0.9);">${e.variety}</div>
+            <div class="truncate mt-0.5" style="font-size:8.5px !important; line-height:1.1; color:#FFFFFF !important; opacity:0.9; text-shadow:0 1px 2px rgba(0,0,0,0.9);">${e.stage} · Day ${e.day}</div>
+          </div>`}
+      </div>`;
+    });
+    grid.innerHTML = html;
+
+    grid.querySelectorAll('[data-photo-id]').forEach(card=>{
+      card.addEventListener('click', ()=>openPhotoDetailModal(card.dataset.photoId));
+    });
+  } else {
+    grid.classList.add('hidden');
+    listFeed?.classList.remove('hidden');
+
+    const limit = state.photoListLimit || 4;
+    const visible = log.slice(0, limit);
+    const hasMore = log.length > limit;
+
+    let html = '';
+    // (2026-07-13) Compact Google Drive style list row with 32px thumbnail; prev: card
+    visible.forEach(e=>{
+      const hc = healthColor[e.health] || '#22C55E';
+      const hl = healthLabel[e.health] || 'Healthy';
+      const formattedDate = formatLogDate(e.dateLabel || e.datePlanted);
+      html += `<div class="photo-log-card group flex items-center justify-between py-2 px-1.5 border-b border-line/30 hover:bg-cream/60 transition-colors cursor-pointer" data-photo-id="${e.id}">
+        <div class="flex items-center gap-3 min-w-0 pr-2">
+          <img src="${e.dataUrl}" class="w-8 h-8 rounded-md object-cover flex-shrink-0 bg-black border border-line/40 shadow-xs" alt="${e.variety} photo" loading="lazy">
+          <div class="min-w-0">
+            <div class="text-[13px] font-semibold text-ink truncate leading-tight">${e.variety}</div>
+            <div class="text-[10.5px] text-ink-soft truncate mt-0.5">${e.stage} · Day ${e.day}</div>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 flex-shrink-0">
+          <span class="text-[10.5px] font-mono text-ink-soft">${formattedDate}</span>
+          <span class="text-[9.5px] font-semibold px-2 py-0.5 rounded-full" style="background:${hc}18;color:${hc};border:1px solid ${hc}44">${hl}</span>
+        </div>
+      </div>`;
+    });
+    listFeed.innerHTML = html;
+
+    listFeed.querySelectorAll('[data-photo-id]').forEach(card=>{
+      card.addEventListener('click', ()=>openPhotoDetailModal(card.dataset.photoId));
+    });
+
+    if(hasMore && btnLoadMore){
+      btnLoadMore.classList.remove('hidden');
+      btnLoadMore.onclick = () => {
+        state.photoListLimit = (state.photoListLimit || 4) + 4;
+        renderTowerPhotoGallery();
+      };
+    } else {
+      btnLoadMore?.classList.add('hidden');
+    }
+  }
+}
+
+// (2026-07-13) Immutable snapshot attributes for photo logs; prev: live compute
+function getTowerCropSummary(e){
+  if(e && (e.snapshotCropBatches || e.cropSummary)){
+    const cropSummary = e.snapshotCropBatches || e.cropSummary;
+    const healthLabel = e.snapshotOverallHealth || e.healthLabel || 'Healthy';
+    const healthColor = e.snapshotHealthColor || e.healthColor || '#22C55E';
+    const healthKey = e.snapshotHealthKey || e.healthKey || 'healthy';
+    const datePlanted = e.snapshotDatePlanted || (e.datePlanted ? formatLogDate(e.datePlanted) : 'Aug 8, 2026');
+
+    if(typeof e === 'object'){
+      e.snapshotCropBatches = cropSummary;
+      e.snapshotOverallHealth = healthLabel;
+      e.snapshotHealthColor = healthColor;
+      e.snapshotHealthKey = healthKey;
+      e.snapshotDatePlanted = datePlanted;
+      e.cropSummary = cropSummary;
+      e.healthLabel = healthLabel;
+      e.healthColor = healthColor;
+    }
+
+    return { cropSummary, healthKey, healthLabel, healthColor, datePlanted };
+  }
+
+  const towerId = e?.towerId || state.activeTowerId;
+  const towerPockets = state.pockets.filter(p=> p.variety && state.rows.find(r=>r.id===p.rowId && r.towerId===towerId));
+
+  let healthyCount = 0, unhealthyCount = 0, deadCount = 0;
+  const batchesMap = new Map();
+
+  if(towerPockets.length > 0){
+    towerPockets.forEach(p => {
+      const row = state.rows.find(r=>r.id===p.rowId);
+      const pState = getPocketState(p);
+      const day = pState.day || (row && row.startDate ? Math.max(1, dayOfCycle(row.startDate)) : (p.day || e?.day || 1));
+      const key = `${p.variety}_${day}`;
+      if(!batchesMap.has(key)){
+        batchesMap.set(key, { variety: p.variety, day });
+      }
+      const h = p.health || 'healthy';
+      if(h === 'healthy') healthyCount++;
+      else if(h === 'unhealthy') unhealthyCount++;
+      else if(h === 'dead') deadCount++;
+    });
+  } else {
+    batchesMap.set(`${e?.variety||'Tower General'}_${e?.day||0}`, { variety: e?.variety||'Tower General', day: e?.day||0 });
+    if(e?.health === 'healthy') healthyCount++;
+    else if(e?.health === 'unhealthy') unhealthyCount++;
+    else if(e?.health === 'dead') deadCount++;
+  }
+
+  const batches = Array.from(batchesMap.values());
+  const cropSummary = batches.map(b => `${b.variety} (Day ${b.day})`).join(' · ');
+
+  const total = healthyCount + unhealthyCount + deadCount;
+  const healthyPct = total > 0 ? (healthyCount / total) * 100 : 100;
+
+  let healthKey = 'healthy';
+  let healthLabel = 'Healthy';
+  let healthColor = '#22C55E';
+
+  if(healthyPct >= 80){
+    healthKey = 'healthy';
+    healthLabel = healthyPct === 100 ? 'Healthy' : 'Mostly Healthy';
+    healthColor = '#22C55E';
+  } else if(unhealthyCount >= deadCount){
+    healthKey = 'unhealthy';
+    healthLabel = 'Needs Attention';
+    healthColor = '#F59E0B';
+  } else {
+    healthKey = 'dead';
+    healthLabel = 'Requires Care';
+    healthColor = '#EF4444';
+  }
+
+  const datePlanted = e?.datePlanted ? formatLogDate(e.datePlanted) : 'Aug 8, 2026';
+
+  if(e && typeof e === 'object'){
+    e.snapshotCropBatches = cropSummary;
+    e.snapshotOverallHealth = healthLabel;
+    e.snapshotHealthColor = healthColor;
+    e.snapshotHealthKey = healthKey;
+    e.snapshotDatePlanted = datePlanted;
+    e.cropSummary = cropSummary;
+    e.healthLabel = healthLabel;
+    e.healthColor = healthColor;
+    persist('photoLog');
+  }
+
+  return { cropSummary, healthKey, healthLabel, healthColor, datePlanted };
+}
+
+function openPhotoDetailModal(photoId){
+  const log = (state.photoLog || []).filter(e=> !state.activeTowerId || e.towerId === state.activeTowerId);
+  if(log.length === 0) return;
+
+  let currentIndex = log.findIndex(x=>x.id===photoId);
+  if(currentIndex === -1) currentIndex = 0;
+
+  let existing = document.getElementById('photoDetailModal');
+  if(existing) existing.remove();
+
+  const prevOverflow = document.body.style.overflow;
+  document.body.style.overflow = 'hidden';
+
+  const modal = document.createElement('div');
+  modal.id = 'photoDetailModal';
+  modal.setAttribute('role','dialog');
+  modal.setAttribute('aria-modal','true');
+  modal.style.cssText = 'position:fixed !important; top:0 !important; left:0 !important; right:0 !important; bottom:0 !important; width:100vw !important; height:100vh !important; z-index:999999 !important; background:#ffffff !important; display:flex; flex-direction:column; justify-content:space-between; overflow-y:auto; user-select:none; transition:all 0.2s ease-out; opacity:0; transform:scale(0.98);';
+
+  requestAnimationFrame(()=>{
+    modal.style.opacity = '1';
+    modal.style.transform = 'scale(1)';
+  });
+
+  // (2026-07-13) Compact 25% top gradient, smaller text & 7x7 X button; prev: 45%
+  function renderLightboxContent(slideDirection = ''){
+    const e = log[currentIndex];
+    const prevPhoto = currentIndex > 0 ? log[currentIndex - 1] : null;
+    const nextPhoto = currentIndex < log.length - 1 ? log[currentIndex + 1] : null;
+    const formattedDate = formatLogDate(e.dateLabel || e.datePlanted);
+
+    // (2026-07-13) Render detail cards strictly from static snapshot metadata; prev: live
+    const summaryInfo = getTowerCropSummary(e);
+    const snapshotCropBatches = e.snapshotCropBatches || summaryInfo.cropSummary;
+    const snapshotOverallHealth = e.snapshotOverallHealth || summaryInfo.healthLabel;
+    const snapshotHealthColor = e.snapshotHealthColor || summaryInfo.healthColor;
+    const snapshotDatePlanted = e.snapshotDatePlanted || summaryInfo.datePlanted;
+    const snapshotStage = e.snapshotStage || e.stage || 'Vegetative';
+
+    const slideAnimClass = slideDirection === 'left' ? 'animate-slide-left' : slideDirection === 'right' ? 'animate-slide-right' : 'animate-fade-in';
+
+    // Calculate file size for display
+    const fileSize = getFileSizeFromDataUrl(e.dataUrl);
+
+    // (2026-07-13) Add Growth Stage 4th card for 2x2 grid symmetry; prev: 3 cards
+    modal.innerHTML = `
+      <div style="width:100% !important; height:60vh !important; max-height:60vh !important; min-height:60vh !important; flex-shrink:0 !important; overflow:hidden !important; position:relative !important; background:#111111 !important;" class="flex items-center justify-center">
+        <div id="photoSlideWrapper" class="w-full h-full relative flex items-center justify-center transition-transform duration-300 ${slideAnimClass}">
+          ${prevPhoto ? `<img src="${prevPhoto.dataUrl}" style="position:absolute !important; left:-86% !important; top:0 !important; width:82% !important; height:100% !important; object-fit:cover !important; opacity:0.35 !important; filter:brightness(0.6) blur(0.5px) !important; border-radius:16px !important;" class="pointer-events-none" alt="previous photo preview">` : ''}
+          <img id="lightboxImg" src="${e.dataUrl}" style="width:100% !important; height:100% !important; max-height:60vh !important; object-fit:cover !important; object-position:center !important;" class="block transition-all duration-300 cursor-pointer relative z-10" alt="${e.variety} photo">
+          ${nextPhoto ? `<img src="${nextPhoto.dataUrl}" style="position:absolute !important; right:-86% !important; top:0 !important; width:82% !important; height:100% !important; object-fit:cover !important; opacity:0.35 !important; filter:brightness(0.6) blur(0.5px) !important; border-radius:16px !important;" class="pointer-events-none" alt="next photo preview">` : ''}
+        </div>
+
+        <div style="position:absolute !important; top:0 !important; left:0 !important; right:0 !important; width:100% !important; height:25% !important; background:linear-gradient(to bottom, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.3) 65%, rgba(0,0,0,0) 100%) !important; pointer-events:none !important; z-index:25 !important;"></div>
+        <div style="position:absolute !important; top:max(18px, calc(14px + env(safe-area-inset-top))) !important; left:0 !important; right:0 !important; width:100% !important; z-index:40 !important;" class="px-4 pt-1 flex items-center justify-between text-white pointer-events-auto">
+          <div class="flex items-center gap-2">
+            <span class="text-[10.5px] font-semibold bg-black/50 backdrop-blur-md px-2.5 py-0.5 rounded-full border border-white/20 text-white shadow-xs">${currentIndex + 1} of ${log.length}</span>
+            <span class="text-[11px] font-medium text-white/90 drop-shadow-sm">${e.towerName}</span>
+          </div>
+          <button id="photoDetailClose" type="button" class="w-7 h-7 rounded-full bg-black/50 backdrop-blur-md hover:bg-black/70 active:scale-95 flex items-center justify-center text-white font-bold text-[13px] transition-all border border-white/20 shadow-xs">✕</button>
+        </div>
+
+        ${currentIndex > 0 ? `
+          <button id="btnPrevPhoto" type="button" style="position:absolute !important; left:6px !important; top:50% !important; transform:translateY(-50%) !important; z-index:40 !important; cursor:pointer !important;" class="p-2 text-white/40 hover:text-white/95 active:scale-95 transition-opacity duration-200 pointer-events-auto">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="w-8 h-8 drop-shadow-md"><path d="m15 18-6-6 6-6"/></svg>
+          </button>` : ''}
+        
+        ${currentIndex < log.length - 1 ? `
+          <button id="btnNextPhoto" type="button" style="position:absolute !important; right:6px !important; top:50% !important; transform:translateY(-50%) !important; z-index:40 !important; cursor:pointer !important;" class="p-2 text-white/40 hover:text-white/95 active:scale-95 transition-opacity duration-200 pointer-events-auto">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="w-8 h-8 drop-shadow-md"><path d="m9 18 6-6-6-6"/></svg>
+          </button>` : ''}
+
+        <div class="absolute bottom-0 left-0 right-0 w-full p-4 pt-12 text-white flex items-end justify-between pointer-events-none z-20" style="background: linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.6) 50%, transparent 100%);">
+          <div class="min-w-0 pr-3">
+            <div class="text-[17px] font-bold text-white drop-shadow-md leading-tight truncate">${e.towerName}</div>
+            <div class="text-[12.5px] text-white/90 drop-shadow-md mt-0.5 font-medium truncate">${snapshotCropBatches}</div>
+          </div>
+          <span class="text-[11px] font-semibold px-3 py-1 rounded-full drop-shadow-md flex-shrink-0" style="background:${snapshotHealthColor}44;color:#FFFFFF;border:1px solid ${snapshotHealthColor}">${snapshotOverallHealth}</span>
+        </div>
+      </div>
+
+      <div class="flex-1 bg-white p-4 md:p-5 flex flex-col justify-between max-w-xl mx-auto w-full">
+        <div class="flex flex-col gap-3">
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <h3 class="font-display font-bold text-[18px] text-forest truncate min-w-0">${e.towerName}</h3>
+            <div class="flex items-center gap-2 flex-shrink-0">
+              <span class="text-[10.5px] font-semibold font-mono text-ink-soft/80 bg-cream/80 px-2 py-0.5 rounded-md border border-line/50">${fileSize}</span>
+              <span class="text-[11.5px] font-semibold font-mono text-ink-soft bg-cream px-2.5 py-1 rounded-full border border-line/60">${formattedDate}</span>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2.5 text-[12.5px]">
+            <div class="bg-cream/60 rounded-2xl p-3 border border-line/60 col-span-2">
+              <div class="text-[10.5px] font-semibold text-ink-soft uppercase tracking-wider mb-0.5">Crop Batches</div>
+              <div class="font-semibold text-ink leading-snug">${snapshotCropBatches}</div>
+            </div>
+            <div class="bg-cream/60 rounded-2xl p-3 border border-line/60">
+              <div class="text-[10.5px] font-semibold text-ink-soft uppercase tracking-wider mb-0.5">Overall Health</div>
+              <div class="font-semibold" style="color:${snapshotHealthColor}">${snapshotOverallHealth}</div>
+            </div>
+            <div class="bg-cream/60 rounded-2xl p-3 border border-line/60">
+              <div class="text-[10.5px] font-semibold text-ink-soft uppercase tracking-wider mb-0.5">Growth Stage</div>
+              <div class="font-semibold text-forest">${snapshotStage}</div>
+            </div>
+            <div class="bg-cream/60 rounded-2xl p-3 border border-line/60 col-span-2">
+              <div class="text-[10.5px] font-semibold text-ink-soft uppercase tracking-wider mb-0.5">Date Planted</div>
+              <div class="font-semibold text-ink">${snapshotDatePlanted}</div>
+            </div>
+          </div>
+        </div>
+
+        <button id="photoDetailDelete" type="button" class="w-full mt-4 text-[13px] font-semibold text-clay bg-[#FCEBD8] hover:bg-[#F8DEC0] rounded-xl py-3 flex items-center justify-center gap-1.5 transition-colors">
+          ${icon('trash-2','w-4 h-4',16)} Delete Photo Log
+        </button>
+      </div>
+    `;
+
+    const imgEl = modal.querySelector('#lightboxImg');
+    if(imgEl){
+      imgEl.addEventListener('click', ()=>{
+        openFullscreenZoomViewer(log, currentIndex);
+      });
+    }
+
+    document.getElementById('photoDetailClose').onclick = closeModal;
+
+    const btnPrev = document.getElementById('btnPrevPhoto');
+    if(btnPrev) btnPrev.onclick = () => { if(currentIndex > 0){ currentIndex--; renderLightboxContent('right'); } };
+
+    const btnNext = document.getElementById('btnNextPhoto');
+    if(btnNext) btnNext.onclick = () => { if(currentIndex < log.length - 1){ currentIndex++; renderLightboxContent('left'); } };
+
+    // (2026-07-13) Photo deletion with interactive Undo toast action; prev: no undo
+    const btnDel = document.getElementById('photoDetailDelete');
+    if(btnDel){
+      btnDel.onclick = () => {
+        const deletedEntry = log[currentIndex];
+        const deletedIdx = currentIndex;
+        state.photoLog = (state.photoLog||[]).filter(x=>x.id!==deletedEntry.id);
+        persist('photoLog');
+        
+        // (2026-07-13) Delete photo from Firestore subcollection
+        if(typeof cloudSync !== 'undefined' && cloudSync.connected){
+          cloudSync.deletePhoto(deletedEntry.id).catch(err => console.error('Photo delete error:', err));
+        }
+        
+        closeModal();
+        renderTowerPhotoGallery();
+
+        showToast('Photo log deleted', 'clay', 'trash-2', {
+          actionLabel: 'Undo',
+          onAction: () => {
+            if(deletedEntry){
+              if(!state.photoLog) state.photoLog = [];
+              state.photoLog.splice(Math.min(deletedIdx, state.photoLog.length), 0, deletedEntry);
+              persist('photoLog');
+              
+              // Re-sync to Firestore on undo
+              if(typeof cloudSync !== 'undefined' && cloudSync.connected){
+                cloudSync.syncPhoto(deletedEntry).catch(err => console.error('Photo restore error:', err));
+              }
+              
+              renderTowerPhotoGallery();
+              showToast('Photo log restored', 'forest', 'rotate-ccw');
+            }
+          }
+        });
+      };
+    }
+
+    const viewerArea = modal.querySelector('#photoSlideWrapper');
+    let startX = 0;
+    let startY = 0;
+    let isDraggingDown = false;
+
+    viewerArea.addEventListener('touchstart', (ev) => {
+      if(ev.touches.length === 1){
+        startX = ev.touches[0].clientX;
+        startY = ev.touches[0].clientY;
+        isDraggingDown = false;
+      }
+    }, { passive: true });
+
+    viewerArea.addEventListener('touchmove', (ev) => {
+      if(ev.touches.length === 1 && !isDraggingDown){
+        const deltaY = ev.touches[0].clientY - startY;
+        if(deltaY > 20){
+          isDraggingDown = true;
+          modal.style.transition = 'none';
+        }
+        if(isDraggingDown && deltaY > 0){
+          modal.style.transform = `translateY(${deltaY * 0.5}px) scale(${1 - deltaY * 0.0003})`;
+          modal.style.opacity = `${1 - deltaY * 0.002}`;
+        }
+      }
+    }, { passive: true });
+
+    viewerArea.addEventListener('touchend', (ev) => {
+      if(ev.changedTouches.length === 1){
+        const deltaX = ev.changedTouches[0].clientX - startX;
+        const deltaY = ev.changedTouches[0].clientY - startY;
+
+        if(isDraggingDown && deltaY > 120){
+          modal.style.transition = 'all 0.25s ease-out';
+          modal.style.opacity = '0';
+          modal.style.transform = 'translateY(100%) scale(0.9)';
+          setTimeout(()=>{
+            document.body.style.overflow = prevOverflow;
+            window.removeEventListener('keydown', handleKeyNav);
+            modal.remove();
+          }, 250);
+          return;
+        }
+
+        if(isDraggingDown){
+          modal.style.transition = 'all 0.2s ease-out';
+          modal.style.transform = 'scale(1)';
+          modal.style.opacity = '1';
+          isDraggingDown = false;
+        }
+
+        if(!isDraggingDown && Math.abs(deltaX) > 40 && Math.abs(deltaX) > Math.abs(deltaY)){
+          if(deltaX < 0 && currentIndex < log.length - 1){
+            currentIndex++;
+            renderLightboxContent('left');
+          } else if(deltaX > 0 && currentIndex > 0){
+            currentIndex--;
+            renderLightboxContent('right');
+          }
+        }
+      }
+    }, { passive: true });
+  }
+
+  function closeModal(){
+    modal.style.opacity = '0';
+    modal.style.transform = 'scale(0.98)';
+    setTimeout(()=>{
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener('keydown', handleKeyNav);
+      modal.remove();
+    }, 150);
+  }
+
+  function handleKeyNav(ev){
+    if(ev.key === 'ArrowLeft' && currentIndex > 0){
+      currentIndex--; renderLightboxContent('right');
+    } else if(ev.key === 'ArrowRight' && currentIndex < log.length - 1){
+      currentIndex++; renderLightboxContent('left');
+    } else if(ev.key === 'Escape'){
+      closeModal();
+    }
+  }
+
+  window.addEventListener('keydown', handleKeyNav);
+  document.body.appendChild(modal);
+  renderLightboxContent();
+}
+
+// (2026-07-13) Fullscreen gallery: double-tap zoom, swipe peeking & album filmstrip
+function openFullscreenZoomViewer(log, initialIndex = 0){
+  if(!log || log.length === 0) return;
+  let currentIndex = Math.max(0, Math.min(initialIndex, log.length - 1));
+  let existing = document.getElementById('fullscreenZoomModal');
+  if(existing) existing.remove();
+
+  // (2026-07-13) Set role=dialog for universal back button stack; prev: no role
+  const fullModal = document.createElement('div');
+  fullModal.id = 'fullscreenZoomModal';
+  fullModal.setAttribute('role', 'dialog');
+  fullModal.setAttribute('aria-modal', 'true');
+  fullModal.style.cssText = 'position:fixed !important; top:0 !important; left:0 !important; right:0 !important; bottom:0 !important; width:100vw !important; height:100vh !important; z-index:9999999 !important; background:#000000 !important; display:flex; flex-direction:column; align-items:center; justify-content:center; overflow:hidden; user-select:none; transition:opacity 0.2s ease-out; opacity:0;';
+
+  // (2026-07-13) Deep 6x pinch zoom, 4x double-tap & pan drag; prev: 2.2x scale
+  let zoomScale = 1;
+  let translateX = 0, translateY = 0;
+  let initialPinchDist = 0;
+  let initialScale = 1;
+  let isDragging = false;
+  let dragStartX = 0, dragStartY = 0;
+  let initialTranslateX = 0, initialTranslateY = 0;
+  let isAlbumVisible = true;
+  let lastTapTime = 0;
+  let tapTimer = null;
+
+  function updateZoomTransform(){
+    const zoomImg = fullModal.querySelector('#fullscreenZoomImg');
+    if(zoomImg){
+      zoomImg.style.transform = `translate(${translateX}px, ${translateY}px) scale(${zoomScale})`;
+    }
+  }
+
+  function renderFullscreenContent(slideDir = ''){
+    zoomScale = 1; translateX = 0; translateY = 0;
+    const e = log[currentIndex];
+    const prevPhoto = currentIndex > 0 ? log[currentIndex - 1] : null;
+    const nextPhoto = currentIndex < log.length - 1 ? log[currentIndex + 1] : null;
+
+    const animClass = slideDir === 'left' ? 'animate-slide-left' : slideDir === 'right' ? 'animate-slide-right' : 'animate-fade-in';
+
+    fullModal.innerHTML = `
+      <div id="fullscreenHeaderBar" style="position:absolute !important; top:max(16px, env(safe-area-inset-top)) !important; left:0 !important; right:0 !important; width:100% !important; z-index:100 !important; transition:all 0.25s ease-out; opacity:${isAlbumVisible?1:0}; transform:translateY(${isAlbumVisible?0:-30}px); pointer-events:${isAlbumVisible?'auto':'none'};" class="px-4 flex items-center justify-between text-white">
+        <div class="flex items-center gap-2.5">
+          <span class="text-[12px] font-semibold bg-white/20 backdrop-blur-md px-3 py-1 rounded-full border border-white/20 text-white shadow-sm">${currentIndex + 1} of ${log.length}</span>
+          <span class="text-[13px] font-semibold text-white/90 drop-shadow-md truncate max-w-[180px]">${e.towerName} · ${e.variety}</span>
+        </div>
+        <button id="fullscreenZoomClose" type="button" class="w-9 h-9 rounded-full bg-black/60 backdrop-blur-md hover:bg-black/80 active:scale-95 flex items-center justify-center text-white font-bold text-[18px] transition-all border border-white/20 shadow-md">✕</button>
+      </div>
+
+      <div id="zoomImgWrapper" class="w-full h-full relative flex items-center justify-center overflow-hidden cursor-pointer ${animClass}">
+        ${prevPhoto ? `<img src="${prevPhoto.dataUrl}" style="position:absolute !important; left:-86% !important; top:10% !important; width:82% !important; height:80% !important; object-fit:contain !important; opacity:0.3 !important; filter:brightness(0.5) !important;" class="pointer-events-none" alt="prev preview">` : ''}
+        <img id="fullscreenZoomImg" src="${e.dataUrl}" style="width:100% !important; height:auto !important; max-height:100vh !important; object-fit:contain !important; transition:transform 0.25s ease-out; transform:translate(${translateX}px, ${translateY}px) scale(${zoomScale});" class="block relative z-10" alt="Fullscreen zoom photo">
+        ${nextPhoto ? `<img src="${nextPhoto.dataUrl}" style="position:absolute !important; right:-86% !important; top:10% !important; width:82% !important; height:80% !important; object-fit:contain !important; opacity:0.3 !important; filter:brightness(0.5) !important;" class="pointer-events-none" alt="next preview">` : ''}
+      </div>
+
+      <div id="fullscreenAlbumBar" style="position:absolute !important; bottom:max(12px, env(safe-area-inset-bottom)) !important; left:0 !important; right:0 !important; width:100% !important; z-index:100 !important; transition:all 0.25s ease-out; opacity:${isAlbumVisible?1:0}; transform:translateY(${isAlbumVisible?0:30}px); pointer-events:${isAlbumVisible?'auto':'none'};" class="px-4">
+        <div class="bg-black/60 backdrop-blur-xl rounded-2xl p-1.5 max-w-sm mx-auto flex items-center justify-center gap-1.5 overflow-x-auto scrollbar-none">
+          ${log.map((item, idx) => `
+            <button data-album-idx="${idx}" type="button" style="width:36px !important; height:36px !important; min-width:36px !important; min-height:36px !important; aspect-ratio:1/1 !important;" class="rounded-lg overflow-hidden flex-shrink-0 border-2 transition-all ${idx===currentIndex ? 'border-emerald-400 scale-105 shadow-md ring-1 ring-emerald-400/50' : 'border-white/30 opacity-50 hover:opacity-100'}">
+              <img src="${item.dataUrl}" style="width:100% !important; height:100% !important; object-fit:cover !important; object-position:center !important;" class="block" alt="album thumbnail ${idx+1}">
+            </button>
+          `).join('')}
+        </div>
+      </div>
+    `;
+
+    const closeBtn = fullModal.querySelector('#fullscreenZoomClose');
+    if(closeBtn){
+      closeBtn.onclick = (ev) => {
+        ev.stopPropagation();
+        fullModal.style.opacity = '0';
+        setTimeout(()=>fullModal.remove(), 200);
+      };
+    }
+
+    fullModal.querySelectorAll('[data-album-idx]').forEach(btn => {
+      btn.onclick = (ev) => {
+        ev.stopPropagation();
+        const targetIdx = Number(btn.dataset.albumIdx);
+        if(targetIdx !== currentIndex){
+          const dir = targetIdx > currentIndex ? 'left' : 'right';
+          currentIndex = targetIdx;
+          renderFullscreenContent(dir);
+        }
+      };
+    });
+
+    // Auto-scroll to center the active thumbnail
+    const scrollToActiveThumb = () => {
+      const albumBar = fullModal.querySelector('#fullscreenAlbumBar');
+      if(!albumBar) return;
+      
+      const scrollContainer = albumBar.querySelector('.overflow-x-auto');
+      if(!scrollContainer) return;
+      
+      const activeThumb = scrollContainer.querySelector(`[data-album-idx="${currentIndex}"]`);
+      if(!activeThumb) return;
+      
+      const containerWidth = scrollContainer.clientWidth;
+      const thumbLeft = activeThumb.offsetLeft;
+      const thumbWidth = activeThumb.clientWidth;
+      
+      // Calculate position to center the thumbnail
+      const scrollPosition = thumbLeft - (containerWidth / 2) + (thumbWidth / 2);
+      
+      scrollContainer.scrollTo({
+        left: scrollPosition,
+        behavior: 'smooth'
+      });
+    };
+    
+    // Scroll to active thumbnail on initial render and after content changes
+    setTimeout(scrollToActiveThumb, 100);
+
+    const wrapper = fullModal.querySelector('#zoomImgWrapper');
+
+    if(wrapper){
+      wrapper.onclick = () => {
+        const now = Date.now();
+        if(now - lastTapTime < 300){
+          if(tapTimer) clearTimeout(tapTimer);
+          if(zoomScale > 1){
+            zoomScale = 1;
+            translateX = 0;
+            translateY = 0;
+          } else {
+            zoomScale = 4.0;
+          }
+          updateZoomTransform();
+        } else {
+          tapTimer = setTimeout(() => {
+            isAlbumVisible = !isAlbumVisible;
+            const albumBar = fullModal.querySelector('#fullscreenAlbumBar');
+            const headerBar = fullModal.querySelector('#fullscreenHeaderBar');
+            if(albumBar){
+              albumBar.style.opacity = isAlbumVisible ? '1' : '0';
+              albumBar.style.transform = `translateY(${isAlbumVisible ? 0 : 30}px)`;
+              albumBar.style.pointerEvents = isAlbumVisible ? 'auto' : 'none';
+            }
+            if(headerBar){
+              headerBar.style.opacity = isAlbumVisible ? '1' : '0';
+              headerBar.style.transform = `translateY(${isAlbumVisible ? 0 : -30}px)`;
+              headerBar.style.pointerEvents = isAlbumVisible ? 'auto' : 'none';
+            }
+          }, 300);
+        }
+        lastTapTime = now;
+      };
+
+      let startX = 0, startY = 0;
+      wrapper.addEventListener('touchstart', (ev) => {
+        if(ev.touches.length === 2){
+          initialPinchDist = Math.hypot(
+            ev.touches[0].clientX - ev.touches[1].clientX,
+            ev.touches[0].clientY - ev.touches[1].clientY
+          );
+          initialScale = zoomScale;
+        } else if(ev.touches.length === 1){
+          startX = ev.touches[0].clientX;
+          startY = ev.touches[0].clientY;
+          if(zoomScale > 1){
+            isDragging = true;
+            dragStartX = ev.touches[0].clientX;
+            dragStartY = ev.touches[0].clientY;
+            initialTranslateX = translateX;
+            initialTranslateY = translateY;
+          }
+        }
+      }, { passive: true });
+
+      wrapper.addEventListener('touchmove', (ev) => {
+        if(ev.touches.length === 2 && initialPinchDist > 0){
+          const currentDist = Math.hypot(
+            ev.touches[0].clientX - ev.touches[1].clientX,
+            ev.touches[0].clientY - ev.touches[1].clientY
+          );
+          const factor = currentDist / initialPinchDist;
+          zoomScale = Math.min(6.0, Math.max(1.0, initialScale * factor));
+          if(zoomScale === 1){ translateX = 0; translateY = 0; }
+          updateZoomTransform();
+        } else if(ev.touches.length === 1 && isDragging && zoomScale > 1){
+          translateX = initialTranslateX + (ev.touches[0].clientX - dragStartX);
+          translateY = initialTranslateY + (ev.touches[0].clientY - dragStartY);
+          updateZoomTransform();
+        }
+      }, { passive: true });
+
+      wrapper.addEventListener('touchend', (ev) => {
+        isDragging = false;
+        initialPinchDist = 0;
+        if(ev.changedTouches.length === 1){
+          const deltaX = ev.changedTouches[0].clientX - startX;
+          const deltaY = ev.changedTouches[0].clientY - startY;
+
+          if(zoomScale === 1 && deltaY > 120 && deltaY > Math.abs(deltaX)){
+            fullModal.style.opacity = '0';
+            fullModal.style.transform = 'translateY(100%)';
+            fullModal.style.transition = 'all 0.25s ease-out';
+            setTimeout(()=>fullModal.remove(), 250);
+            return;
+          }
+
+          if(zoomScale === 1 && Math.abs(deltaX) > 40 && Math.abs(deltaX) > Math.abs(deltaY)){
+            if(deltaX < 0 && currentIndex < log.length - 1){
+              currentIndex++;
+              renderFullscreenContent('left');
+            } else if(deltaX > 0 && currentIndex > 0){
+              currentIndex--;
+              renderFullscreenContent('right');
+            }
+          }
+        }
+      }, { passive: true });
+    }
+  }
+
+  document.body.appendChild(fullModal);
+  requestAnimationFrame(()=>{ fullModal.style.opacity = '1'; });
+  renderFullscreenContent();
+}
+
 document.getElementById('towerSearch')?.addEventListener('input', ()=>renderTower());
-// (2026-07-13) Position pocket number above plus icon; prev: overlapping center
+
+// (2026-07-13) Support uploading up to 5 photos at once; prev: single file
+document.getElementById('galleryPhotoInput')?.addEventListener('change', (e)=>{
+  const files = Array.from(e.target.files || []).slice(0, 5);
+  if(files.length === 0) return;
+
+  const towerId = state.activeTowerId;
+  const tower = state.towers.find(t=>t.id===towerId);
+  const activePockets = state.pockets.filter(p=>p.variety && state.rows.find(r=>r.id===p.rowId && r.towerId===towerId));
+  const p = activePockets[0] || null;
+  const row = p ? state.rows.find(r=>r.id===p.rowId) : null;
+  const { stage, day } = p ? getPocketState(p) : { stage:null, day:0 };
+
+  // (2026-07-13) Dark blur backdrop & Okay button for upload modal; prev: plain
+  let doneCount = 0;
+  let autoCloseTimer = null;
+  let progressModal = document.getElementById('photoUploadProgressModal');
+  if(progressModal) progressModal.remove();
+
+  progressModal = document.createElement('div');
+  progressModal.id = 'photoUploadProgressModal';
+  progressModal.style.cssText = 'position:fixed !important; top:0 !important; left:0 !important; right:0 !important; bottom:0 !important; width:100vw !important; height:100vh !important; z-index:9999999 !important; background:rgba(20,30,24,0.75) !important; backdrop-filter:blur(12px) !important; opacity:0; transition:opacity 0.2s ease-out;';
+  progressModal.className = 'flex items-center justify-center p-4';
+  progressModal.innerHTML = `
+    <div class="bg-white rounded-2xl p-6 shadow-2xl max-w-[420px] w-full flex flex-col items-center text-center border border-line/20" style="animation: modalPopIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;">
+      <div id="photoUploadThumbnail" class="w-32 h-32 rounded-xl overflow-hidden mb-4 bg-cream border-2 border-line/30 flex items-center justify-center" style="min-height:128px; max-height:128px; min-width:128px; max-width:128px;">
+        <svg class="w-12 h-12 text-ink-soft/30" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+          <circle cx="8.5" cy="8.5" r="1.5"/>
+          <polyline points="21 15 16 10 5 21"/>
+        </svg>
+      </div>
+      <div id="photoUploadIconContainer" class="mb-3">
+        <svg class="animate-spin w-10 h-10 text-forest" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+      </div>
+      <h3 id="photoUploadTitle" class="font-display font-bold text-[22px] text-forest leading-tight mb-3">Uploading Photos...</h3>
+      <p id="photoUploadSub" class="text-[14px] text-ink-soft/80 mb-6 leading-relaxed">Compressing and processing images</p>
+      <div class="w-full bg-cream/80 rounded-full h-2.5 mb-3 overflow-hidden shadow-inner border border-line/30">
+        <div id="photoUploadProgressBar" class="h-full bg-gradient-to-r from-forest via-leaf to-forest rounded-full" style="width:0%;"></div>
+      </div>
+      <div id="photoUploadProgressPct" class="text-center text-[15px] font-mono font-bold text-forest mb-6 tracking-wide">0%</div>
+      <button id="photoUploadOkBtn" type="button" class="w-full bg-forest hover:bg-forest/90 active:scale-[0.98] text-white font-bold text-[16px] py-4 rounded-2xl shadow-lg transition-all hidden">
+        Okay
+      </button>
+    </div>
+  `;
+  document.body.appendChild(progressModal);
+  
+  // Fade in the modal
+  requestAnimationFrame(() => {
+    progressModal.style.opacity = '1';
+  });
+
+  const barEl = progressModal.querySelector('#photoUploadProgressBar');
+  const pctEl = progressModal.querySelector('#photoUploadProgressPct');
+  const iconContainer = progressModal.querySelector('#photoUploadIconContainer');
+  const titleEl = progressModal.querySelector('#photoUploadTitle');
+  const subEl = progressModal.querySelector('#photoUploadSub');
+  const okBtn = progressModal.querySelector('#photoUploadOkBtn');
+  const thumbnailEl = progressModal.querySelector('#photoUploadThumbnail');
+
+  const closeUploadModal = () => {
+    if(autoCloseTimer) clearTimeout(autoCloseTimer);
+    progressModal.style.opacity = '0';
+    progressModal.style.transition = 'opacity 0.2s ease-out';
+    setTimeout(()=>progressModal.remove(), 200);
+  };
+
+  if(okBtn) okBtn.onclick = closeUploadModal;
+
+  // Track start time for animation timing
+  const uploadStartTime = Date.now();
+  
+  // Animate progress bar smoothly from 0 to 100% over 2.5 seconds
+  let currentProgress = 0;
+  const animationDuration = 2500; // 2.5 seconds total
+  const updateInterval = 30; // Update every 30ms for smooth animation
+  const totalSteps = animationDuration / updateInterval;
+  const progressIncrement = 100 / totalSteps;
+  
+  let progressAnimationInterval = setInterval(() => {
+    currentProgress += progressIncrement;
+    if(currentProgress >= 100) {
+      currentProgress = 100;
+      clearInterval(progressAnimationInterval);
+    }
+    
+    if(barEl){
+      barEl.style.width = `${currentProgress}%`;
+    }
+    if(pctEl){
+      pctEl.textContent = `${Math.floor(currentProgress)}%`;
+    }
+  }, updateInterval);
+  
+  // Process files with compression (happens in background while animation runs)
+  let processedCount = 0;
+  const totalFiles = files.length;
+
+  files.forEach(async (file, idx)=>{
+    try {
+      // Show first image thumbnail
+      if(idx === 0 && thumbnailEl){
+        const previewReader = new FileReader();
+        previewReader.onload = (e) => {
+          thumbnailEl.innerHTML = `<img src="${e.target.result}" class="w-full h-full object-cover" style="min-height:128px; max-height:128px; min-width:128px; max-width:128px; object-position:center;" alt="upload preview">`;
+        };
+        previewReader.readAsDataURL(file);
+      }
+
+      // Compress image (max 1200px width, 80% quality)
+      const compressedDataUrl = await compressImage(file, 1200, 0.8);
+
+      const currentBatchSummary = getTowerCropSummary({ towerId });
+      const entry = {
+        id: 'ph_' + Date.now() + '_' + idx + '_' + Math.random().toString(36).substring(2,6),
+        dataUrl: compressedDataUrl,
+        towerId,
+        towerName: tower?.name || 'Tower',
+        pocketId: p?.id || '—',
+        rowLabel: row ? `Row ${state.rows.indexOf(row)+1}` : '—',
+        variety: p?.variety || 'Tower General',
+        health: p?.health || 'healthy',
+        stage: stage?.label || 'N/A',
+        stageKey: stage?.key || '',
+        day: day || 0,
+        datePlanted: p?.datePlanted || null,
+        cropSummary: currentBatchSummary.cropSummary,
+        healthKey: currentBatchSummary.healthKey,
+        healthLabel: currentBatchSummary.healthLabel,
+        healthColor: currentBatchSummary.healthColor,
+        loggedAt: new Date().toISOString(),
+        dateLabel: new Date().toLocaleDateString('en-PH',{year:'numeric',month:'long',day:'numeric'})
+      };
+      
+      if(!state.photoLog) state.photoLog = [];
+      state.photoLog.unshift(entry);
+      processedCount++;
+
+      // (2026-07-13) Sync each photo to separate Firestore document
+      if(typeof cloudSync !== 'undefined' && cloudSync.connected){
+        cloudSync.syncPhoto(entry).catch(err => console.error('Photo sync error:', err));
+      }
+
+      // When all files are done processing, wait for animation to finish then show success
+      if(processedCount === totalFiles){
+        // Wait for animation to reach 100% (or at least 2.5 seconds)
+        const waitTime = Math.max(0, 2500 - (Date.now() - uploadStartTime));
+        setTimeout(async () => {
+          // Clear animation interval if still running
+          if(progressAnimationInterval) clearInterval(progressAnimationInterval);
+          
+          // Ensure bar is at 100%
+          if(barEl) barEl.style.width = '100%';
+          if(pctEl) pctEl.textContent = '100%';
+          
+          // Small delay to show 100% before success state
+          await new Promise(resolve => setTimeout(resolve, 300));
+          
+          
+          if(state.photoLog.length > 100) state.photoLog = state.photoLog.slice(0,100);
+          persist('photoLog');
+          renderTowerPhotoGallery();
+
+          // Success state
+        if(thumbnailEl){
+          thumbnailEl.className = 'w-32 h-32 rounded-xl overflow-hidden mb-4 bg-forest/10 border-2 border-forest/30 flex items-center justify-center relative';
+          thumbnailEl.style.cssText = 'min-height:128px; max-height:128px; min-width:128px; max-width:128px;';
+          const checkIcon = document.createElement('div');
+          checkIcon.className = 'absolute inset-0 bg-forest/90 flex items-center justify-center';
+          checkIcon.innerHTML = `<svg class="w-16 h-16 text-white" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+          thumbnailEl.appendChild(checkIcon);
+        }
+        if(iconContainer){
+          iconContainer.innerHTML = '';
+          iconContainer.style.display = 'none';
+        }
+        if(titleEl){
+          titleEl.className = 'font-display font-bold text-[22px] text-forest leading-tight mb-3';
+          titleEl.innerHTML = `<span style="display:inline-block; margin-right:8px;">✓</span>Upload Successful!`;
+        }
+        if(subEl){
+          subEl.className = 'text-[14px] text-ink-soft/70 mb-6 leading-relaxed';
+          subEl.textContent = 'Photo saved to Tower Growth History';
+        }
+        if(pctEl){
+          pctEl.style.display = 'block';
+        }
+        if(okBtn){
+          okBtn.classList.remove('hidden');
+          okBtn.style.display = 'block';
+        }
+        showToast(`Uploaded ${totalFiles} photo(s) to Tower History`, 'forest', 'camera');
+        e.target.value = '';
+
+        autoCloseTimer = setTimeout(()=>{
+          closeUploadModal();
+        }, 3000);
+        }, waitTime); // Close setTimeout
+      } // Close if processedCount === totalFiles
+    } catch(err){
+      console.error('Image compression failed:', err);
+      processedCount++;
+    }
+  });
+});
+// (2026-07-13) Use SVG icons and yellow/red borders for pocket chip health; prev: emojis
 function pocketChipHTML(p){
   const {status, day, stage} = getPocketState(p);
   const stageKey = stage ? stage.key : 'empty';
-  return `<button data-pocket-chip="${p.id}" class="pocket-chip status-${status} flex flex-col items-center justify-between p-2 flex-shrink-0 shadow-sm">
+  const health = p.health || 'healthy';
+  const healthBadge = p.variety && health==='unhealthy' ? `<span class="absolute top-0.5 right-0.5">${icon('alert-triangle','w-3 h-3 text-[#D97706]',12)}</span>` : p.variety && health==='dead' ? `<span class="absolute top-0.5 right-0.5">${icon('x-circle','w-3 h-3 text-[#DC2626]',12)}</span>` : '';
+  const healthBorder = p.variety && health==='unhealthy' ? 'ring-2 ring-[#F59E0B] bg-[#FEF3C7]/40' : p.variety && health==='dead' ? 'ring-2 ring-[#EF4444] bg-[#FEE2E2]/40 opacity-75' : '';
+  return `<button data-pocket-chip="${p.id}" class="pocket-chip status-${status} ${healthBorder} relative flex flex-col items-center justify-between p-2 flex-shrink-0 shadow-sm">
+    ${healthBadge}
     <span class="text-[11px] font-mono font-bold text-ink-soft/90 pt-0.5">#${p.id}</span>
     <span class="my-auto">${plantIcon(status==='empty'?'empty':stageKey, 26)}</span>
     <span class="text-[9.5px] font-semibold text-ink-soft leading-none pb-0.5">${p.variety ? ('D'+day) : '—'}</span>
@@ -1188,6 +2262,9 @@ function openPocketModal(id){
     const idx = stageIndex(stage.key);
     const progressPct = Math.min(100, Math.round((day/45)*100));
     const est = nextTransitionInfo(day, stage);
+    // (2026-07-13) Normalize health so single-tap works from fresh pocket; prev: !p.health fallback
+    if(!p.health) p.health = 'healthy';
+    const ph = p.health;
     body.innerHTML = `
       <div class="flex items-center gap-3 mb-4 bg-cream rounded-xl p-3">
         <div class="flex-shrink-0">${plantIcon(stage.key,56)}</div>
@@ -1209,6 +2286,15 @@ function openPocketModal(id){
         ${icon('timer','w-4 h-4 text-[#8a6a12] flex-shrink-0',18)}
         <div class="text-[12px] text-[#8a6a12]">${est.done ? `<strong>Harvest window is open</strong> — pick whenever ready.` : `Next: <strong>${est.label}</strong> in ${est.daysUntil===0?'today':est.daysUntil+' day(s)'} <span class="opacity-70">(${fmtDate(est.date)})</span>`}</div>
       </div>
+      <!-- (2026-07-13) Health buttons: all 3 get bg when active; prev: partial styling -->
+      <div class="mb-4">
+        <label class="text-[12px] font-semibold text-ink-soft mb-1.5 block">Plant Condition / Health</label>
+        <div class="grid grid-cols-3 gap-2">
+          <button id="btnPocketHealthHealthy" class="py-2.5 px-1 text-[12.5px] rounded-xl border flex items-center justify-center gap-1.5 transition-all ${ph==='healthy'?'bg-[#DCFCE7] border-[#22C55E] text-[#15803D] font-semibold shadow-sm':'border-line text-ink-soft'}">${icon('circle-check','w-4 h-4',16)} Healthy</button>
+          <button id="btnPocketHealthUnhealthy" class="py-2.5 px-1 text-[12.5px] rounded-xl border flex items-center justify-center gap-1.5 transition-all ${ph==='unhealthy'?'bg-[#FEF3C7] border-[#F59E0B] text-[#92400E] font-semibold shadow-sm':'border-line text-ink-soft'}">${icon('alert-triangle','w-4 h-4',16)} Unhealthy</button>
+          <button id="btnPocketHealthDead" class="py-2.5 px-1 text-[12.5px] rounded-xl border flex items-center justify-center gap-1.5 transition-all ${ph==='dead'?'bg-[#FEE2E2] border-[#EF4444] text-[#991B1B] font-semibold shadow-sm':'border-line text-ink-soft'}">${icon('x-circle','w-4 h-4',16)} Dead</button>
+        </div>
+      </div>
       <div class="grid grid-cols-2 gap-2.5 mb-3">
         <button id="btnAdvanceStage" class="text-[13px] font-semibold text-forest bg-mint rounded-lg py-2.5 flex items-center justify-center gap-1.5" ${idx>=STAGES.length-1?'disabled':''}>${icon('arrow-right-circle','w-4 h-4',16)} Advance Stage</button>
         <button id="btnHarvestPocket" class="text-[13px] font-semibold text-white bg-gold rounded-lg py-2.5 flex items-center justify-center gap-1.5">${icon('scissors','w-4 h-4',16)} Harvest</button>
@@ -1218,54 +2304,26 @@ function openPocketModal(id){
         <button id="btnClearPocket" class="text-[12.5px] font-medium text-clay bg-[#FCEBD8] rounded-lg py-2.5 flex items-center justify-center gap-1.5">${icon('trash-2','w-4 h-4',16)} Clear Pocket</button>
       </div>`;
 
+    const setPocketHealth = (h)=>{
+      p.health = h;
+      logActivityNotification('⚠️ Plant Health Updated', `Pocket #${id} (${p.variety}) marked as ${h}`, 'alert-triangle');
+      persist('pockets'); openPocketModal(id); renderTower();
+      showToast(`Pocket #${id} marked as ${h}`,'forest','sprout');
+    };
+    document.getElementById('btnPocketHealthHealthy')?.addEventListener('click', ()=>setPocketHealth('healthy'));
+    document.getElementById('btnPocketHealthUnhealthy')?.addEventListener('click', ()=>setPocketHealth('unhealthy'));
+    document.getElementById('btnPocketHealthDead')?.addEventListener('click', ()=>setPocketHealth('dead'));
+
     document.getElementById('btnAdvanceStage').addEventListener('click', ()=>{
       p.override = Math.min(STAGES.length-1, idx+1);
       persist('pockets'); openPocketModal(id); renderTower();
       showToast(`Pocket #${id} advanced to ${STAGES[p.override].label}`,'forest','arrow-right-circle');
     });
     document.getElementById('btnHarvestPocket').addEventListener('click', ()=>{ closeModal('pocketModal'); openHarvestModal(p); });
-    // (2026-07-13) Bi-directional tower-to-tray reversion logic; prev: none
+    // (2026-07-13) Open target tray selector modal on Return to Tray; prev: auto tray
     document.getElementById('btnReturnToTray')?.addEventListener('click', ()=>{
-      const snapshotPockets = JSON.parse(JSON.stringify(state.pockets));
-      const snapshotTrays = JSON.parse(JSON.stringify(state.trays));
-      
-      let targetTray = state.trays.find(t=>t.variety===p.variety);
-      if(!targetTray && state.trays.length>0) targetTray = state.trays[0];
-      if(!targetTray){
-        targetTray = {
-          id: 'tr_' + Date.now(),
-          variety: p.variety || 'Seedlings',
-          startDate: p.datePlanted || new Date().toISOString().split('T')[0],
-          gridRows: 3,
-          gridCols: 4,
-          count: 0
-        };
-        state.trays.push(targetTray);
-      }
-
-      const cells = getTrayCells(targetTray);
-      const emptyCell = cells.find(c=>!c.filled);
-      if(!emptyCell){
-        showToast('No empty cells available in tray!', 'clay', 'alert-triangle');
-        return;
-      }
-
-      emptyCell.filled = true;
-      targetTray.count = cells.filter(c=>c.filled).length;
-
-      const plantName = p.variety || 'Plant';
-      p.variety = null; p.datePlanted = null; p.override = null;
-
-      persist('pockets'); persist('trays');
       closeModal('pocketModal');
-      renderTower(); renderNursery();
-
-      triggerUndoSnackbar(`Returned ${plantName} to tray cell [${emptyCell.id}]`, ()=>{
-        state.pockets = snapshotPockets;
-        state.trays = snapshotTrays;
-        persist('pockets'); persist('trays');
-        renderTower(); renderNursery();
-      });
+      openReturnTrayModal(id);
     });
     document.getElementById('btnClearPocket').addEventListener('click', ()=>{
       const snapshotPockets = JSON.parse(JSON.stringify(state.pockets));
@@ -1280,10 +2338,74 @@ function openPocketModal(id){
   }
   document.getElementById('pocketModal').classList.remove('hidden');
 }
+
+// (2026-07-13) Modal to select target tray and cell for reversion; prev: auto tray
+function openReturnTrayModal(pocketId){
+  const p = state.pockets.find(x=>String(x.id)===String(pocketId));
+  if(!p || !p.variety) return;
+  
+  const selectEl = document.getElementById('returnTargetTraySelect');
+  if(!selectEl) return;
+  if(state.trays.length === 0){
+    showToast('No seedling nursery trays available!', 'clay', 'alert-triangle');
+    return;
+  }
+  
+  selectEl.innerHTML = state.trays.map(t=>`<option value="${t.id}">${t.variety} (${t.count} cells filled)</option>`).join('');
+  
+  const renderCellGrid = ()=>{
+    const targetTray = state.trays.find(t=>t.id===selectEl.value) || state.trays[0];
+    const cells = getTrayCells(targetTray);
+    const gridEl = document.getElementById('returnTrayCellGrid');
+    if(!gridEl) return;
+    const cols = targetTray.gridCols || 4;
+    gridEl.style.display = 'grid';
+    gridEl.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+    gridEl.style.gap = '6px';
+    gridEl.innerHTML = cells.map((c, i)=>`
+      <div class="aspect-square rounded-md text-[10px] font-mono flex items-center justify-center border transition-all ${c.filled ? 'bg-line/40 text-ink-soft opacity-50' : 'bg-mint/40 border-forest text-forest font-bold'}">
+        ${c.id}
+      </div>`).join('');
+  };
+  
+  selectEl.onchange = renderCellGrid;
+  renderCellGrid();
+
+  document.getElementById('btnConfirmReturnToTray').onclick = ()=>{
+    const targetTray = state.trays.find(t=>t.id===selectEl.value) || state.trays[0];
+    const cells = getTrayCells(targetTray);
+    const emptyCell = cells.find(c=>!c.filled);
+    if(!emptyCell){
+      showToast('Selected tray has no empty cells!', 'clay', 'alert-triangle');
+      return;
+    }
+    const snapshotPockets = JSON.parse(JSON.stringify(state.pockets));
+    const snapshotTrays = JSON.parse(JSON.stringify(state.trays));
+    
+    emptyCell.filled = true;
+    targetTray.count = cells.filter(c=>c.filled).length;
+    const plantName = p.variety;
+    p.variety = null; p.datePlanted = null; p.override = null; delete p.photo;
+    
+    persist('pockets'); persist('trays');
+    closeModal('returnTrayModal');
+    renderTower(); renderNursery();
+    logActivityNotification('↩️ Returned to Tray', `Returned ${plantName} to tray "${targetTray.variety}" cell [${emptyCell.id}]`, 'move-left');
+    triggerUndoSnackbar(`Returned ${plantName} to tray cell [${emptyCell.id}]`, ()=>{
+      state.pockets = snapshotPockets; state.trays = snapshotTrays;
+      persist('pockets'); persist('trays');
+      renderTower(); renderNursery();
+    });
+  };
+  
+  document.getElementById('returnTrayModal').classList.remove('hidden');
+}
+
 function closeModal(id){ document.getElementById(id).classList.add('hidden'); }
 // (2026-07-13) Add newTowerModalClose and renameTowerModalClose handlers
 document.getElementById('newTowerModalClose')?.addEventListener('click', ()=>closeModal('newTowerModal'));
 document.getElementById('renameTowerModalClose')?.addEventListener('click', ()=>closeModal('renameTowerModal'));
+document.getElementById('returnTrayModalClose')?.addEventListener('click', ()=>closeModal('returnTrayModal'));
 document.getElementById('pocketModalClose').addEventListener('click', ()=>closeModal('pocketModal'));
 document.getElementById('rowModalClose').addEventListener('click', ()=>closeModal('rowModal'));
 document.getElementById('addRowModalClose').addEventListener('click', ()=>closeModal('addRowModal'));
@@ -1407,7 +2529,7 @@ function trayCellSelect(trayId, idx){
     renderNursery();
   }
 }
-// (2026-07-13) Index-based grid state helper for 3x4 seedling tray grid cells; prev: count integer only
+// (2026-07-13) Add health state to seedling tray cells; prev: filled only
 function getTrayCells(tray){
   const rows = tray.gridRows || 3;
   const cols = tray.gridCols || 4;
@@ -1417,7 +2539,7 @@ function getTrayCells(tray){
     tray.cells = Array.from({ length: total }, (_, i) => {
       const r = Math.floor(i / cols);
       const c = i % cols;
-      return { id: `${r}-${c}`, index: i, filled: i < filledCount };
+      return { id: `${r}-${c}`, index: i, filled: i < filledCount, health: 'healthy' };
     });
   }
   return tray.cells;
@@ -1483,7 +2605,8 @@ function renderNursery(){
             const segEnd   = segStart + seg.d;
             const fill = Math.min(100, Math.max(0, ((Math.min(day, segEnd) - segStart) / seg.d) * 100));
             const radius = si===0 ? '4px 0 0 4px' : si===3 ? '0 4px 4px 0' : '0';
-            return `<div class="relative overflow-hidden bg-[#E3EAE3]" style="flex:${seg.d};border-radius:${radius};">
+            // (2026-07-13) Visible slate gray for unfilled nursery segments; prev: light gray
+            return `<div class="relative overflow-hidden bg-[#CBD5E1]" style="flex:${seg.d};border-radius:${radius};background-color:#CBD5E1 !important;">
               <div style="height:100%;width:${fill}%;background:${seg.color};border-radius:${radius};transition:width .4s;"></div>
             </div>`;
           }).join('')}
@@ -1509,9 +2632,11 @@ function renderNursery(){
         <button data-tray-select-all="${t.id}" class="text-[12px] font-semibold text-forest hover:text-forest/80 transition-colors">Select all ${t.count}</button>
         ${selectedHere.size>0 ? `<span class="text-[12px] font-semibold text-forest bg-mint/60 px-2 py-0.5 rounded-md">${selectedHere.size} selected</span>` : ''}
       </div>
+      <!-- (2026-07-13) Add single cell edit button & health styling; prev: bulk action -->
       <div class="flex gap-2 mt-auto">
         ${selectedHere.size>0
-          ? `<button data-tray-move="${t.id}" class="flex-1 text-[12.5px] font-semibold text-white bg-forest hover:bg-forest/90 rounded-xl py-2.5 flex items-center justify-center gap-1.5 transition-colors shadow-xs">${icon('move-up-right','w-3.5 h-3.5',14)} Move ${selectedHere.size} to Tower</button>
+          ? `${selectedHere.size===1 ? `<button data-tray-edit-cell="${t.id}" data-cell-idx="${Array.from(selectedHere)[0]}" class="text-[12.5px] font-semibold text-forest bg-mint hover:bg-mint/80 rounded-xl py-2.5 px-3 transition-colors flex items-center justify-center gap-1">${icon('pencil','w-3.5 h-3.5',14)} Edit</button>` : ''}
+             <button data-tray-move="${t.id}" class="flex-1 text-[12.5px] font-semibold text-white bg-forest hover:bg-forest/90 rounded-xl py-2.5 flex items-center justify-center gap-1.5 transition-colors shadow-xs">${icon('move-up-right','w-3.5 h-3.5',14)} Move ${selectedHere.size} to Tower</button>
              <button data-tray-clear-sel="${t.id}" class="text-[12.5px] font-medium text-ink-soft bg-cream hover:bg-cream-dark rounded-xl py-2.5 px-3 transition-colors">${icon('x','w-3.5 h-3.5',14)}</button>`
           : ready
             ? `<button data-tray-transplant="${t.id}" class="flex-1 text-[12.5px] font-semibold text-white bg-forest hover:bg-forest/90 rounded-xl py-2.5 flex items-center justify-center gap-1.5 transition-colors shadow-xs">${icon('move-up-right','w-3.5 h-3.5',14)} Move All to Tower</button>`
@@ -1529,11 +2654,16 @@ function renderNursery(){
       cell.dataset.trayId = t.id;
       const isSelected = selectedHere.has(i);
       const isFilled = cellData.filled;
+      const cellHealth = cellData.health || 'healthy';
+      const healthBorder = cellHealth === 'unhealthy' ? 'ring-2 ring-[#F59E0B] bg-[#FEF3C7]/40' : cellHealth === 'dead' ? 'ring-2 ring-[#EF4444] bg-[#FEE2E2]/40 opacity-75' : '';
+      const healthBadge = cellHealth === 'unhealthy' ? `<span class="absolute -top-1 -right-1">${icon('alert-triangle','w-3 h-3 text-[#D97706]',12)}</span>` : cellHealth === 'dead' ? `<span class="absolute -top-1 -right-1">${icon('x-circle','w-3 h-3 text-[#DC2626]',12)}</span>` : '';
 
-      cell.className = `aspect-square rounded-md flex items-center justify-center cursor-pointer touch-none nursery-cell-cube transition-all ${isFilled ? (isSelected ? 'selected' : '') : 'opacity-40 border border-dashed border-line/60 bg-black/10 hover:opacity-80 hover:border-forest/60 hover:bg-mint/20'}`;
+      // (2026-07-13) Add health class so CSS can override selected green; prev: no health class on el
+      const healthClass = isFilled && cellHealth !== 'healthy' ? `health-${cellHealth}` : '';
+      cell.className = `aspect-square rounded-md flex items-center justify-center cursor-pointer touch-none nursery-cell-cube relative transition-all ${healthClass} ${isFilled ? (isSelected ? 'selected ' : '') + healthBorder : 'opacity-40 border border-dashed border-line/60 bg-black/10 hover:opacity-80 hover:border-forest/60 hover:bg-mint/20'}`;
       cell.setAttribute('aria-label', `Cell ${i+1} [${cellData.id}], ${t.variety}${isFilled ? (isSelected ? ', selected' : '') : ', empty (tap to plant)'}`);
       cell.setAttribute('aria-pressed', String(isSelected));
-      cell.innerHTML = isFilled ? plantIcon(stage.key, 22) : `<span class="text-[9px] font-mono text-ink-soft/60">${cellData.id}</span>`;
+      cell.innerHTML = isFilled ? `${plantIcon(stage.key, 22)}${healthBadge}` : `<span class="text-[9px] font-mono text-ink-soft/60">${cellData.id}</span>`;
       
       if(isFilled){
         cell.addEventListener('pointerdown', (e)=>{
@@ -1621,9 +2751,96 @@ function renderNursery(){
       persist('trays'); renderNursery();
     });
   }));
-  // (2026-07-13) Wire edit tray button; prev: none
+  // (2026-07-13) Wire edit tray button & cell edit button; prev: edit tray only
   list.querySelectorAll('[data-tray-edit]').forEach(btn=>btn.addEventListener('click', ()=>openEditTrayModal(btn.dataset.trayEdit)));
+  list.querySelectorAll('[data-tray-edit-cell]').forEach(btn=>btn.addEventListener('click', ()=>openTrayCellModal(btn.dataset.trayEditCell, Number(btn.dataset.cellIdx))));
 }
+
+// (2026-07-13) Modal logic to edit health status of specific tray seedling cell; prev: none
+function openTrayCellModal(trayId, cellIdx){
+  const tray = state.trays.find(t=>t.id===trayId);
+  if(!tray) return;
+  const cells = getTrayCells(tray);
+  const cell = cells[cellIdx];
+  if(!cell) return;
+  // (2026-07-13) Normalize cell.health so single-tap works; prev: || fallback in template
+  if(!cell.health) cell.health = 'healthy';
+  const health = cell.health;
+  
+  document.getElementById('trayCellModalTitle').textContent = `Tray "${tray.variety}" · Cell #${cellIdx+1} [${cell.id}]`;
+  const body = document.getElementById('trayCellModalBody');
+  body.innerHTML = `
+    <div class="bg-cream rounded-xl p-3.5 mb-4">
+      <div class="text-[13px] font-semibold text-ink mb-1">Seedling Cell Details</div>
+      <div class="text-[12px] text-ink-soft">Variety: <strong>${tray.variety}</strong> · Status: ${cell.filled?'Planted':'Empty'}</div>
+    </div>
+    <!-- (2026-07-13) SVG icons & yellow/red theme for tray cell health; prev: emojis -->
+    <label class="text-[12px] font-semibold text-ink-soft mb-2 block">Seedling Health / Condition</label>
+    <div class="grid grid-cols-3 gap-2 mb-4">
+    <!-- (2026-07-13) Remove bg-white from inactive state so active bg renders; prev: bg-white conflict -->
+    <button id="btnCellHealthHealthy" class="py-2.5 px-1 text-[12.5px] rounded-xl border flex items-center justify-center gap-1.5 transition-all ${health==='healthy'?'bg-[#DCFCE7] border-[#22C55E] text-[#15803D] font-semibold shadow-sm':'border-line text-ink-soft'}">${icon('circle-check','w-4 h-4',16)} Healthy</button>
+      <button id="btnCellHealthUnhealthy" class="py-2.5 px-1 text-[12.5px] rounded-xl border flex items-center justify-center gap-1.5 transition-all ${health==='unhealthy'?'bg-[#FEF3C7] border-[#F59E0B] text-[#92400E] font-semibold shadow-sm':'border-line text-ink-soft'}">${icon('alert-triangle','w-4 h-4',16)} Unhealthy</button>
+      <button id="btnCellHealthDead" class="py-2.5 px-1 text-[12.5px] rounded-xl border flex items-center justify-center gap-1.5 transition-all ${health==='dead'?'bg-[#FEE2E2] border-[#EF4444] text-[#991B1B] font-semibold shadow-sm':'border-line text-ink-soft'}">${icon('x-circle','w-4 h-4',16)} Dead</button>
+    </div>
+    <!-- (2026-07-13) Add photo attachment preview to seedling cell modal; prev: none -->
+    <div class="mb-4 bg-cream/40 p-3 rounded-xl border border-line/60">
+      <label class="text-[12px] font-semibold text-ink-soft mb-1.5 flex items-center justify-between cursor-pointer">
+        <span>📷 Seedling Photo</span>
+        <span class="text-[11.5px] font-semibold text-forest underline">${cell.photo?'Change Photo':'Attach Photo'}</span>
+        <input id="cellPhotoInput" type="file" accept="image/*" class="hidden">
+      </label>
+      ${cell.photo ? `<div class="relative mt-1 max-h-[120px] rounded-lg overflow-hidden border border-line bg-black/5 flex items-center justify-center">
+        <img src="${cell.photo}" class="max-h-[120px] object-contain rounded-lg" alt="Seedling Photo">
+        <button id="btnRemoveCellPhoto" class="absolute top-1.5 right-1.5 w-6 h-6 bg-black/60 text-white rounded-full flex items-center justify-center text-[10px]">✕</button>
+      </div>` : '<p class="text-[11px] text-ink-soft">Attach a photo for this seedling cell.</p>'}
+    </div>
+    <div class="flex flex-col gap-2">
+      <button id="btnClearDeadCell" class="w-full text-[12.5px] font-medium text-clay bg-[#FCEBD8] hover:bg-[#F8DEC0] rounded-xl py-2.5 flex items-center justify-center gap-1.5 transition-colors">${icon('trash-2','w-4 h-4',16)} Clear / Remove Dead Seedling</button>
+    </div>`;
+
+  const setHealth = (h)=>{
+    cell.health = h;
+    logActivityNotification('⚠️ Seedling Health Updated', `Tray ${tray.variety} Cell #${cellIdx+1} marked as ${h}`, 'alert-triangle');
+    persist('trays');
+    openTrayCellModal(trayId, cellIdx);
+    renderNursery();
+    showToast(`Cell #${cellIdx+1} marked as ${h}`,'forest','sprout');
+  };
+  document.getElementById('btnCellHealthHealthy')?.addEventListener('click', ()=>setHealth('healthy'));
+  document.getElementById('btnCellHealthUnhealthy')?.addEventListener('click', ()=>setHealth('unhealthy'));
+  document.getElementById('btnCellHealthDead')?.addEventListener('click', ()=>setHealth('dead'));
+
+  document.getElementById('cellPhotoInput')?.addEventListener('change', (e)=>{
+    const file = e.target.files[0]; if(!file) return;
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      cell.photo = reader.result;
+      persist('trays'); openTrayCellModal(trayId, cellIdx);
+      showToast('Seedling photo attached','forest','camera');
+    };
+    reader.readAsDataURL(file);
+  });
+  document.getElementById('btnRemoveCellPhoto')?.addEventListener('click', ()=>{
+    delete cell.photo;
+    persist('trays'); openTrayCellModal(trayId, cellIdx);
+  });
+  document.getElementById('btnClearDeadCell')?.addEventListener('click', ()=>{
+    const snapshotTrays = JSON.parse(JSON.stringify(state.trays));
+    cell.filled = false;
+    cell.health = 'healthy';
+    tray.count = cells.filter(c=>c.filled).length;
+    persist('trays');
+    closeModal('trayCellModal');
+    renderNursery();
+    triggerUndoSnackbar(`Removed seedling from cell [${cell.id}]`, ()=>{
+      state.trays = snapshotTrays;
+      persist('trays');
+      renderNursery();
+    });
+  });
+  document.getElementById('trayCellModal').classList.remove('hidden');
+}
+document.getElementById('trayCellModalClose')?.addEventListener('click', ()=>closeModal('trayCellModal'));
 
 // (2026-07-13) Edit tray modal logic; prev: none
 let editingTrayId = null;
@@ -2051,7 +3268,8 @@ async function requestBrowserNotifs(){
   if(perm==='granted'){ state.settings.browserNotifs=true; persist('settings'); showToast('Browser notifications enabled — keep this tab open','forest','bell'); document.getElementById('firstPlantPrompt')?.classList.add('hidden'); }
   else showToast('Notification permission was not granted','clay','bell-off');
 }
-document.getElementById('btnEnableNotifs').addEventListener('click', requestBrowserNotifs);
+// (2026-07-13) Guard btnEnableNotifs; element removed from HTML; prev: hard crash
+document.getElementById('btnEnableNotifs')?.addEventListener('click', requestBrowserNotifs);
 document.getElementById('btnEnableNotifsPrompt')?.addEventListener('click', requestBrowserNotifs);
 document.getElementById('btnDismissFirstPlant')?.addEventListener('click', ()=>document.getElementById('firstPlantPrompt').classList.add('hidden'));
 
@@ -2105,7 +3323,144 @@ function renderExpenses(){
       harvestList.appendChild(row);
     });
   }
+  // (2026-07-13) Harvest photo upload & harvest gallery render; prev: no photos
+  renderHarvestGallery();
 }
+
+let pendingHarvestPhoto = null;
+document.getElementById('harvestPhotoInput')?.addEventListener('change', (e)=>{
+  const file = e.target.files[0]; if(!file) return;
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    pendingHarvestPhoto = reader.result;
+    const imgEl = document.getElementById('harvestPhotoImg');
+    const prevEl = document.getElementById('harvestPhotoPreview');
+    if(imgEl) imgEl.src = reader.result;
+    if(prevEl) prevEl.classList.remove('hidden');
+    showToast('Harvest photo attached', 'forest', 'camera');
+  };
+  reader.readAsDataURL(file);
+});
+document.getElementById('btnRemoveHarvestPhoto')?.addEventListener('click', ()=>{
+  pendingHarvestPhoto = null;
+  document.getElementById('harvestPhotoPreview')?.classList.add('hidden');
+  const inp = document.getElementById('harvestPhotoInput');
+  if(inp) inp.value = '';
+});
+
+function resetHarvestPhotoForm(){
+  pendingHarvestPhoto = null;
+  document.getElementById('harvestPhotoPreview')?.classList.add('hidden');
+  const inp = document.getElementById('harvestPhotoInput');
+  if(inp) inp.value = '';
+}
+
+function renderHarvestGallery(){
+  const grid = document.getElementById('harvestGalleryGrid');
+  const empty = document.getElementById('harvestGalleryEmpty');
+  const countEl = document.getElementById('harvestPhotoCount');
+  if(!grid) return;
+
+  const photos = state.harvests.filter(h=>h.photo);
+  if(countEl) countEl.textContent = `${photos.length} photo${photos.length!==1?'s':''}`;
+
+  if(photos.length === 0){
+    grid.innerHTML = '';
+    empty?.classList.remove('hidden');
+    return;
+  }
+  empty?.classList.add('hidden');
+
+  // (2026-07-13) Soft gradient & z-20 pure white text overlay; prev: dark covered
+  grid.innerHTML = photos.slice().reverse().map(h=>`
+    <div class="photo-log-card group relative cursor-pointer rounded-2xl overflow-hidden bg-black shadow-sm border border-line/20" data-harvest-photo-id="${h.id}">
+      <img src="${h.photo}" style="width:100% !important; height:100% !important; object-fit:cover !important;" class="w-full aspect-square block group-hover:scale-105 transition-transform duration-300" alt="${h.variety} harvest" loading="lazy">
+      <div style="position:absolute !important; bottom:0 !important; left:0 !important; right:0 !important; width:100% !important; height:50% !important; background:linear-gradient(to top, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.3) 60%, rgba(0,0,0,0) 100%) !important; pointer-events:none !important; z-index:5 !important;"></div>
+      <div class="absolute bottom-0 left-0 right-0 p-2 text-white" style="z-index:20 !important;">
+        <div class="text-[11px] font-bold leading-tight truncate" style="color:#FFFFFF !important; text-shadow:0 1px 3px rgba(0,0,0,0.9);">${h.variety}</div>
+        <div class="flex items-center justify-between mt-0.5">
+          <span class="text-[9.5px]" style="color:#FFFFFF !important; opacity:0.9; text-shadow:0 1px 2px rgba(0,0,0,0.9);">${formatLogDate(h.date)}</span>
+          <span class="text-[9.5px] font-mono font-bold text-gold bg-black/40 px-1.5 py-0.5 rounded-full">${h.grams}g</span>
+        </div>
+      </div>
+    </div>
+  `).join('');
+
+  grid.querySelectorAll('[data-harvest-photo-id]').forEach(card=>{
+    card.addEventListener('click', ()=>{
+      const h = state.harvests.find(x=>x.id===card.dataset.harvestPhotoId);
+      if(h) openPhotoDetailModal_Harvest(h);
+    });
+  });
+}
+
+// (2026-07-13) Fix z-index priority on harvest modal; prev: z-[100]
+function openPhotoDetailModal_Harvest(h){
+  let existing = document.getElementById('harvestDetailModal');
+  if(existing) existing.remove();
+  const val = Math.round((h.grams/1000)*(h.marketRate||500));
+  const modal = document.createElement('div');
+  modal.id = 'harvestDetailModal';
+  modal.setAttribute('role','dialog');
+  modal.setAttribute('aria-modal','true');
+  modal.style.cssText = 'position:fixed !important; top:0 !important; left:0 !important; right:0 !important; bottom:0 !important; width:100vw !important; height:100vh !important; z-index:999999 !important; background:rgba(0,0,0,0.95) !important; display:flex; flex-direction:column; justify-content:space-between; padding:16px; overflow-y:auto; user-select:none; backdrop-filter:blur(12px);';
+  modal.innerHTML = `
+    <div class="flex items-center justify-between w-full max-w-lg mx-auto py-2 px-1 flex-shrink-0">
+      <div>
+        <div class="font-display font-bold text-[16px] leading-tight">${h.variety}</div>
+        <div class="text-[11.5px] text-white/60">${fmtDate(h.date)}</div>
+      </div>
+      <button id="harvestDetailClose" type="button" class="w-9 h-9 rounded-full bg-white/15 hover:bg-white/25 flex items-center justify-center text-[18px] font-bold transition-colors">✕</button>
+    </div>
+
+    <div class="flex-1 flex flex-col items-center justify-center my-auto py-3 w-full max-w-lg mx-auto">
+      <div id="harvestPhotoFrame" class="relative max-w-md w-full aspect-square overflow-hidden rounded-2xl bg-black border border-white/15 shadow-2xl transition-all duration-300 cursor-pointer flex items-center justify-center">
+        <img id="harvestDetailImg" src="${h.photo}" class="w-full h-full object-cover transition-all duration-300" alt="Harvest photo">
+        <div id="harvestZoomBadge" class="absolute bottom-3 left-1/2 -translate-x-1/2 bg-black/65 backdrop-blur-md text-white/90 text-[10.5px] font-medium px-3 py-1 rounded-full border border-white/20 pointer-events-none shadow-md">
+          Tap photo to view full / uncropped
+        </div>
+      </div>
+    </div>
+
+    <div class="w-full max-w-lg mx-auto bg-white/10 backdrop-blur-xl border border-white/15 rounded-2xl p-4 flex flex-col gap-3 flex-shrink-0 mb-2">
+      <div class="flex items-center justify-between">
+        <div class="font-display font-bold text-[17px] text-white">${h.variety}</div>
+        <span class="text-[12px] font-mono font-bold text-emerald-400 bg-emerald-500/20 border border-emerald-500/30 px-3 py-1 rounded-full">${h.grams} grams</span>
+      </div>
+      <div class="grid grid-cols-2 gap-2 text-[11.5px] text-white/80">
+        <div class="bg-black/30 rounded-xl p-2.5 border border-white/10"><div class="text-white/40 text-[10px] uppercase font-semibold">Date Harvested</div><div class="font-medium mt-0.5">${fmtDate(h.date)}</div></div>
+        <div class="bg-black/30 rounded-xl p-2.5 border border-white/10"><div class="text-white/40 text-[10px] uppercase font-semibold">Saved Market Value</div><div class="font-medium text-emerald-400 mt-0.5">₱${val}</div></div>
+      </div>
+    </div>`;
+
+  document.body.appendChild(modal);
+
+  let isFullView = false;
+  const frame = modal.querySelector('#harvestPhotoFrame');
+  const img = modal.querySelector('#harvestDetailImg');
+  const badge = modal.querySelector('#harvestZoomBadge');
+
+  frame.addEventListener('click', ()=>{
+    isFullView = !isFullView;
+    if(isFullView){
+      frame.classList.remove('aspect-square', 'max-w-md');
+      frame.classList.add('max-h-[75vh]');
+      img.classList.remove('h-full', 'object-cover');
+      img.classList.add('max-h-[75vh]', 'w-auto', 'object-contain');
+      badge.textContent = 'Tap to fit 1:1 square';
+    } else {
+      frame.classList.remove('max-h-[75vh]');
+      frame.classList.add('aspect-square', 'max-w-md');
+      img.classList.remove('max-h-[75vh]', 'w-auto', 'object-contain');
+      img.classList.add('h-full', 'object-cover');
+      badge.textContent = 'Tap photo to view full / uncropped';
+    }
+  });
+
+  document.getElementById('harvestDetailClose').onclick = ()=>modal.remove();
+  modal.addEventListener('click', ev=>{ if(ev.target===modal) modal.remove(); });
+}
+
 document.getElementById('btnAddExpense').addEventListener('click', ()=>{ document.getElementById('expenseForm').reset(); document.getElementById('expenseModal').classList.remove('hidden'); });
 document.getElementById('expenseForm').addEventListener('submit', (e)=>{
   e.preventDefault();
@@ -2115,26 +3470,30 @@ document.getElementById('expenseForm').addEventListener('submit', (e)=>{
 });
 document.getElementById('btnAddHarvest').addEventListener('click', ()=>{
   document.getElementById('harvestForm').reset();
+  resetHarvestPhotoForm();
   document.getElementById('harvestForm').onsubmit = harvestFormDefaultHandler;
   document.getElementById('harvestModal').classList.remove('hidden');
 });
 function harvestFormDefaultHandler(e){
   e.preventDefault();
-  state.harvests.push({ id: uid(), variety: document.getElementById('harvestVariety').value || 'Unspecified', grams: Number(document.getElementById('harvestGrams').value)||0, date: todayISO() });
-  persist('harvests'); closeModal('harvestModal'); renderExpenses();
+  const rate = Number(document.getElementById('harvestMarketRate')?.value) || 500;
+  state.harvests.push({ id: uid(), variety: document.getElementById('harvestVariety').value || 'Unspecified', grams: Number(document.getElementById('harvestGrams').value)||0, marketRate: rate, photo: pendingHarvestPhoto || null, date: todayISO() });
+  persist('harvests'); closeModal('harvestModal'); resetHarvestPhotoForm(); renderExpenses();
   showToast('Harvest logged','gold','scissors');
 }
 document.getElementById('harvestForm').addEventListener('submit', harvestFormDefaultHandler);
 function openHarvestModal(pocket){
   document.getElementById('harvestForm').reset();
+  resetHarvestPhotoForm();
   document.getElementById('harvestVariety').value = pocket.variety;
   document.getElementById('harvestModal').classList.remove('hidden');
   document.getElementById('harvestForm').onsubmit = (e)=>{
     e.preventDefault();
-    state.harvests.push({ id: uid(), variety: document.getElementById('harvestVariety').value || pocket.variety, grams: Number(document.getElementById('harvestGrams').value)||0, date: todayISO(), pocketId: pocket.id });
+    const rate = Number(document.getElementById('harvestMarketRate')?.value) || 500;
+    state.harvests.push({ id: uid(), variety: document.getElementById('harvestVariety').value || pocket.variety, grams: Number(document.getElementById('harvestGrams').value)||0, marketRate: rate, photo: pendingHarvestPhoto || null, date: todayISO(), pocketId: pocket.id });
     pocket.variety=null; pocket.datePlanted=null; pocket.override=null;
     persist('harvests'); persist('pockets');
-    closeModal('harvestModal'); renderTower();
+    closeModal('harvestModal'); resetHarvestPhotoForm(); renderTower();
     showToast(`Harvested Pocket #${pocket.id}`,'gold','scissors');
     document.getElementById('harvestForm').onsubmit = harvestFormDefaultHandler;
   };
@@ -2270,7 +3629,11 @@ function updateRotationPlanner(){
 });
 
 /* ================= FIRST RENDER ================= */
-renderDashboard();
+const savedNavPage = (function(){
+  try { return localStorage.getItem('ht_active_page'); } catch(e){ return null; }
+})();
+const initialNavPage = savedNavPage && document.getElementById('page-' + savedNavPage) ? savedNavPage : 'dashboard';
+showPage(initialNavPage, { instant: true });
 updateNutrients();
 updateRotationPlanner();
 maybeTriggerFirstPlantFlow();
@@ -2278,3 +3641,218 @@ updateSyncStatus('offline');
 if (typeof bootAuth === 'function') {
   bootAuth().catch(err => console.log('Auth boot skipped:', err));
 }
+
+// (2026-07-13) Log activity & milestone notifications; prev: toast only
+function logActivityNotification(title, message, iconName){
+  if (!state.alertLog) state.alertLog = [];
+  state.alertLog.unshift({
+    id: 'act_' + Date.now(),
+    title,
+    message,
+    timestamp: Date.now(),
+    iconName: iconName || 'bell'
+  });
+  persist('alertLog');
+  if (typeof notificationManager !== 'undefined' && notificationManager.sendNotification) {
+    notificationManager.sendNotification(title, message);
+  }
+}
+
+// (2026-07-13) Custom reminders manager; prev: none
+function getCustomReminders(){
+  return store.get('custom_reminders', [
+    { id: 'cr_1', title: 'Check Reservoir pH & EC', time: '08:30', active: true },
+    { id: 'cr_2', title: 'Refill Water Tank', time: '17:00', active: true }
+  ]);
+}
+function renderCustomReminders(){
+  const container = document.getElementById('customReminderList');
+  if(!container) return;
+  const list = getCustomReminders();
+  if(list.length === 0){
+    container.innerHTML = '<div class="text-[12px] text-ink-soft text-center py-2">No custom reminders set.</div>';
+    return;
+  }
+  container.innerHTML = list.map(r=>`
+    <div class="flex items-center justify-between p-2 rounded-xl bg-cream/40 border border-line/60">
+      <div>
+        <div class="font-semibold text-[13px] text-ink">${r.title}</div>
+        <div class="text-[11.5px] font-mono text-ink-soft">${r.time}</div>
+      </div>
+      <div class="flex items-center gap-2">
+        <div class="switch ${r.active?'active':''}" data-custom-rem-toggle="${r.id}" role="switch" aria-checked="${r.active}" tabindex="0"></div>
+        <button data-custom-rem-del="${r.id}" class="text-clay hover:text-clay-dark p-1">${icon('trash-2','w-3.5 h-3.5',14)}</button>
+      </div>
+    </div>`).join('');
+
+  container.querySelectorAll('[data-custom-rem-toggle]').forEach(sw=>{
+    sw.addEventListener('click', ()=>{
+      const id = sw.dataset.customRemToggle;
+      const rems = getCustomReminders();
+      const r = rems.find(x=>x.id===id);
+      if(r){ r.active = !r.active; store.set('custom_reminders', rems); renderCustomReminders(); }
+    });
+  });
+  container.querySelectorAll('[data-custom-rem-del]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const id = btn.dataset.customRemDel;
+      const rems = getCustomReminders().filter(x=>x.id!==id);
+      store.set('custom_reminders', rems); renderCustomReminders();
+    });
+  });
+}
+// (2026-07-13) Open modal for adding reminder; prev: browser prompt()
+document.getElementById('btnAddCustomReminder')?.addEventListener('click', ()=>{
+  const titleEl = document.getElementById('addReminderTitle');
+  const timeEl = document.getElementById('addReminderTime');
+  if(titleEl) titleEl.value = '';
+  if(timeEl) timeEl.value = '09:00';
+  document.getElementById('addReminderModal')?.classList.remove('hidden');
+  setTimeout(()=>titleEl?.focus(), 100);
+});
+document.getElementById('addReminderModalClose')?.addEventListener('click', ()=>document.getElementById('addReminderModal')?.classList.add('hidden'));
+document.getElementById('btnConfirmAddReminder')?.addEventListener('click', ()=>{
+  const title = (document.getElementById('addReminderTitle')?.value || '').trim();
+  const time = document.getElementById('addReminderTime')?.value || '09:00';
+  if(!title) { document.getElementById('addReminderTitle')?.focus(); return; }
+  const rems = getCustomReminders();
+  rems.push({ id: 'cr_' + Date.now(), title, time, active: true });
+  store.set('custom_reminders', rems);
+  document.getElementById('addReminderModal')?.classList.add('hidden');
+  renderCustomReminders();
+});
+renderCustomReminders();
+
+// (2026-07-13) Pest diagnostic photo upload preview; prev: text only
+document.getElementById('pestPhotoInput')?.addEventListener('change', (e)=>{
+  const file = e.target.files[0]; if(!file) return;
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    document.getElementById('pestPhotoImg').src = reader.result;
+    document.getElementById('pestPhotoPreview').classList.remove('hidden');
+    showToast('Leaf photo attached for diagnostic check', 'forest', 'camera');
+  };
+  reader.readAsDataURL(file);
+});
+document.getElementById('btnRemovePestPhoto')?.addEventListener('click', ()=>{
+  document.getElementById('pestPhotoPreview').classList.add('hidden');
+  document.getElementById('pestPhotoInput').value = '';
+});
+
+// (2026-07-13) Export financial and harvest summary PDF report; prev: none
+function exportFinancialPDFReport(){
+  const spent = state.expenses.reduce((s,e)=>s+Number(e.amount||0),0);
+  const grams = state.harvests.reduce((s,h)=>s+Number(h.grams||0),0);
+  const savings = Math.round((grams/1000)*500);
+  const roi = spent > 0 ? Math.round((savings/spent)*100) : 0;
+  
+  const win = window.open('', '_blank');
+  win.document.write(`<!DOCTYPE html><html><head><title>HydroTrack Financial Report</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; margin: 30px; color: #1e293b; }
+    h1 { color: #166534; margin-bottom: 4px; }
+    .meta { color: #64748b; font-size: 13px; margin-bottom: 24px; }
+    .cards { display: flex; gap: 16px; margin-bottom: 24px; }
+    .card { flex: 1; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; }
+    .card-label { font-size: 12px; color: #64748b; font-weight: 500; }
+    .card-val { font-size: 22px; font-weight: 700; color: #166534; margin-top: 4px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 16px; margin-bottom: 24px; font-size: 13px; }
+    th, td { border: 1px solid #e2e8f0; padding: 8px 12px; text-align: left; }
+    th { background: #f1f5f9; color: #334155; }
+    h2 { font-size: 16px; color: #166534; border-bottom: 2px solid #e2e8f0; padding-bottom: 6px; }
+  </style></head><body>
+  <h1>HydroTrack Yield & Financial Report</h1>
+  <div class="meta">Generated on ${new Date().toLocaleDateString()} · Active Tower System</div>
+  <div class="cards">
+    <div class="card"><div class="card-label">Total Invested</div><div class="card-val">₱${spent.toLocaleString()}</div></div>
+    <div class="card"><div class="card-label">Total Harvested</div><div class="card-val">${grams.toLocaleString()} g</div></div>
+    <div class="card"><div class="card-label">Market Value Saved</div><div class="card-val">₱${savings.toLocaleString()}</div></div>
+    <div class="card"><div class="card-label">ROI Recovered</div><div class="card-val">${roi}%</div></div>
+  </div>
+  <h2>Harvest Log Summary</h2>
+  <table><thead><tr><th>Date</th><th>Variety</th><th>Yield (Grams)</th><th>Est. Value</th></tr></thead><tbody>
+  ${state.harvests.length ? state.harvests.map(h=>`<tr><td>${h.date||'—'}</td><td>${h.variety}</td><td>${h.grams}g</td><td>₱${Math.round((h.grams/1000)*500)}</td></tr>`).join('') : '<tr><td colspan="4">No harvests logged yet.</td></tr>'}
+  </tbody></table>
+  <h2>Expense Log Summary</h2>
+  <table><thead><tr><th>Date</th><th>Item</th><th>Category</th><th>Amount</th></tr></thead><tbody>
+  ${state.expenses.length ? state.expenses.map(e=>`<tr><td>${e.date||'—'}</td><td>${e.name}</td><td>${e.category}</td><td>₱${Number(e.amount).toLocaleString()}</td></tr>`).join('') : '<tr><td colspan="4">No expenses logged yet.</td></tr>'}
+  </tbody></table>
+  <script>window.onload = function(){ window.print(); };</script>
+  </body></html>`);
+  win.document.close();
+}
+document.getElementById('btnExportFinancialPDF')?.addEventListener('click', exportFinancialPDFReport);
+
+// (2026-07-13) Add universal back button modal close & double-back exit; prev: none
+let lastBackPressTime = 0;
+
+// (2026-07-13) Modal stack dismissal hierarchy for photo detail & zoom; prev: direct
+function handleUniversalBack(){
+  const openModals = Array.from(document.querySelectorAll('#fullscreenZoomModal, [role="dialog"]:not(.hidden):not(#authOverlay)'));
+  if(openModals.length > 0){
+    const topModal = openModals[openModals.length - 1];
+    if(topModal.id === 'fullscreenZoomModal'){
+      topModal.style.opacity = '0';
+      setTimeout(()=>topModal.remove(), 150);
+    } else if(topModal.id === 'photoDetailModal'){
+      const closeBtn = topModal.querySelector('#photoDetailClose');
+      if(closeBtn) closeBtn.click();
+      else topModal.remove();
+    } else if(topModal.id === 'confirmModal'){
+      const cancelBtn = document.getElementById('confirmModalCancel');
+      if(cancelBtn) cancelBtn.click();
+      else topModal.classList.add('hidden');
+    } else if(topModal.id){
+      closeModal(topModal.id);
+    } else {
+      topModal.classList.add('hidden');
+    }
+    return true;
+  }
+
+  const activePageEl = document.querySelector('.page:not(.hidden)');
+  const activePageId = activePageEl ? activePageEl.id.replace('page-', '') : 'dashboard';
+
+  if(activePageId !== 'dashboard'){
+    showPage('dashboard', { fromNav: true, fromPopState: true });
+    lastBackPressTime = 0;
+    return true;
+  }
+
+  const now = Date.now();
+  if(now - lastBackPressTime < 2000){
+    const appPlugin = window.Capacitor?.Plugins?.App || (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform() ? window.Capacitor.Plugins.App : null);
+    if(appPlugin?.exitApp){
+      appPlugin.exitApp();
+    } else if(navigator.app?.exitApp){
+      navigator.app.exitApp();
+    }
+  } else {
+    lastBackPressTime = now;
+    showToast('Press back again to exit', 'clay', 'log-out');
+  }
+  return true;
+}
+
+function initBackButtonListener(){
+  if(window.Capacitor?.Plugins?.App?.addListener){
+    window.Capacitor.Plugins.App.addListener('backButton', ()=>{
+      handleUniversalBack();
+    });
+  }
+}
+
+initBackButtonListener();
+document.addEventListener('deviceready', initBackButtonListener);
+document.addEventListener('DOMContentLoaded', initBackButtonListener);
+
+try {
+  window.history.replaceState({ page: 'dashboard' }, '');
+} catch(e){}
+
+window.addEventListener('popstate', ()=>{
+  handleUniversalBack();
+  try {
+    window.history.pushState({ page: 'active' }, '');
+  } catch(e){}
+});

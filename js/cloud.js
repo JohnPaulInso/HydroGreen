@@ -132,10 +132,43 @@ const cloudSync = {
         rows: state.rows, pockets: state.pockets, trays: state.trays,
         expenses: state.expenses, harvests: state.harvests, settings: state.settings,
         completed: state.completed, alertLog: state.alertLog, meta: state.meta,
+        // (2026-07-13) Remove photoLog from main document (moved to subcollection)
         _updatedAt: Date.now()
       };
       await this.fns.setDoc(this.ref, payload, { merge:true });
     } catch(err){ console.error('Cloud push failed:', err); }
+  },
+
+  // (2026-07-13) Sync photos to separate subcollection (bypasses 1MB limit)
+  async syncPhoto(photo){
+    if(!this.db || !this.ref || !this.connected) return;
+    try{
+      const photosRef = this.fns.collection(this.db, 'hydrotrack_towers', this.user.uid, 'photos');
+      const photoDocRef = this.fns.doc(photosRef, photo.id);
+      await this.fns.setDoc(photoDocRef, photo);
+    } catch(err){ console.error('Photo sync failed:', err); }
+  },
+
+  async deletePhoto(photoId){
+    if(!this.db || !this.ref || !this.connected) return;
+    try{
+      const photosRef = this.fns.collection(this.db, 'hydrotrack_towers', this.user.uid, 'photos');
+      const photoDocRef = this.fns.doc(photosRef, photoId);
+      await this.fns.deleteDoc(photoDocRef);
+    } catch(err){ console.error('Photo delete failed:', err); }
+  },
+
+  async loadPhotos(){
+    if(!this.db || !this.ref || !this.connected) return [];
+    try{
+      const photosRef = this.fns.collection(this.db, 'hydrotrack_towers', this.user.uid, 'photos');
+      const q = this.fns.query(photosRef, this.fns.orderBy('loggedAt', 'desc'), this.fns.limit(100));
+      const snapshot = await this.fns.getDocs(q);
+      return snapshot.docs.map(doc => doc.data());
+    } catch(err){ 
+      console.error('Photo load failed:', err); 
+      return [];
+    }
   }
 };
 
@@ -195,14 +228,46 @@ function seedNewAccount(user){
 }
 
 function applyRemoteState(remote){
-  ['towers','rows','pockets','trays','expenses','harvests','settings','completed','alertLog','meta'].forEach(part=>{
-    if(remote[part]!==undefined){ state[part] = remote[part]; store.set(KEYS[part], remote[part]); }
-  });
+  // (2026-07-13) Photos loaded separately from subcollection; prev: included in main doc
+  state.towers = remote.towers || state.towers;
+  state.activeTowerId = remote.activeTowerId || state.activeTowerId;
+  state.rows = remote.rows || state.rows;
+  state.pockets = remote.pockets || state.pockets;
+  state.trays = remote.trays || state.trays;
+  state.expenses = remote.expenses || state.expenses;
+  state.harvests = remote.harvests || state.harvests;
+  state.settings = remote.settings || state.settings;
+  state.completed = remote.completed || state.completed;
+  state.alertLog = remote.alertLog || state.alertLog;
+  state.meta = remote.meta || state.meta;
+  
+  // Load photos from subcollection
+  if(cloudSync.connected) loadPhotosFromCloud();
+  
+  // Save to localStorage
+  Object.keys(KEYS).forEach(k=>{ if(k!=='photoLog') store.set(KEYS[k], state[k]); });
+  
+  // Update activeTowerId
   if(remote.activeTowerId!==undefined){
-    state.activeTowerId = remote.activeTowerId;
     localStorage.setItem(KEYS.activeTower, remote.activeTowerId);
   }
+  
+  // Render page
   if(typeof renderPage==='function') renderPage(typeof currentPageName==='function' ? currentPageName() : 'dashboard');
+}
+
+// (2026-07-13) Load photos from Firestore subcollection
+async function loadPhotosFromCloud(){
+  try{
+    const photos = await cloudSync.loadPhotos();
+    if(photos.length > 0){
+      state.photoLog = photos;
+      store.set(KEYS.photoLog, photos);
+      if(typeof renderPage==='function') renderPage(typeof currentPageName==='function' ? currentPageName() : 'dashboard');
+    }
+  } catch(err){
+    console.error('Failed to load photos:', err);
+  }
 }
 
 /* ---- Sign-in status pill (sidebar + mobile) ---- */
@@ -277,12 +342,25 @@ function updateSyncStatus(status, detail){
    the full app before we know if a session exists), kick off the quiet
    auth check, and only reveal the app once we have an answer — unless
    the person already chose to work offline. */
-// (2026-07-13) Remove offline mode bypass in bootAuth; prev: checked OFFLINE_MODE_KEY
+// (2026-07-13) Only show auth overlay if no user is cached; prev: always showed
 async function bootAuth(){
-  localStorage.removeItem(OFFLINE_MODE_KEY);
-  showAuthOverlay();
-  document.getElementById('authOverlayLoading')?.classList.remove('hidden');
-  document.getElementById('authOverlayButtons')?.classList.add('hidden');
+  // Check if we have a cached user first (Firebase persists auth state)
+  const authStateCheckPromise = new Promise((resolve) => {
+    _resolveAuthCheck = resolve;
+  });
+  
+  // Don't show overlay yet - let Firebase check cached session first
   await cloudSync.initAuth();
-  await authCheckDone;
+  
+  // If after 1 second we still don't have a user, show the overlay
+  const timeoutId = setTimeout(() => {
+    if (!cloudSync.user) {
+      showAuthOverlay();
+      document.getElementById('authOverlayLoading')?.classList.remove('hidden');
+      document.getElementById('authOverlayButtons')?.classList.add('hidden');
+    }
+  }, 1000);
+  
+  await authStateCheckPromise;
+  clearTimeout(timeoutId);
 }

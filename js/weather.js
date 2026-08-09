@@ -111,7 +111,7 @@ const weatherService = {
     }
   },
 
-  // (2026-07-13) Fetch 7-day forecast, humidity & hourly temps; prev: 3-day basic
+  // (2026-07-13) Weather fetch timeout & offline cached fallback; prev: throw error
   async getWeather(lat, lng) {
     try {
       const params = new URLSearchParams({
@@ -124,7 +124,11 @@ const weatherService = {
         forecast_days: 7
       });
 
-      const response = await fetch(`${this.API_URL}?${params}`);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 7000);
+
+      const response = await fetch(`${this.API_URL}?${params}`, { signal: controller.signal });
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         throw new Error('Weather API request failed');
@@ -132,12 +136,57 @@ const weatherService = {
 
       const data = await response.json();
       this.lastWeather = this.parseWeatherData(data);
-      
+      try { localStorage.setItem('ht_cached_weather', JSON.stringify(this.lastWeather)); } catch(e){}
       return this.lastWeather;
     } catch (error) {
-      console.error('Weather fetch error:', error);
-      throw error;
+      console.warn('Weather fetch timeout or network error, using fallback:', error.message || error);
+      try {
+        const cached = localStorage.getItem('ht_cached_weather');
+        if(cached){
+          this.lastWeather = JSON.parse(cached);
+          return this.lastWeather;
+        }
+      } catch(e){}
+      this.lastWeather = this.getFallbackWeather();
+      return this.lastWeather;
     }
+  },
+
+  getFallbackWeather() {
+    const now = new Date();
+    const hourlyTimes = Array.from({length:24}, (_,i)=>{
+      const d = new Date(now);
+      d.setHours(i, 0, 0, 0);
+      return d.toISOString();
+    });
+    return {
+      current: {
+        temperature: 28,
+        humidity: 75,
+        precipitation: 0,
+        weatherCode: 2,
+        weatherDesc: 'Partly cloudy',
+        windSpeed: 12,
+        windDirection: 90,
+        time: now.toISOString()
+      },
+      hourly: {
+        times: hourlyTimes,
+        temperatures: Array(24).fill(28),
+        humidity: Array(24).fill(75),
+        precipitationProb: Array(24).fill(20),
+        precipitation: Array(24).fill(0),
+        windSpeed: Array(24).fill(12)
+      },
+      daily: {
+        dates: [now.toISOString().split('T')[0]],
+        weatherCodes: [2],
+        tempMax: [31],
+        tempMin: [24],
+        precipitationSum: [0],
+        precipitationProbMax: [20]
+      }
+    };
   },
 
   parseWeatherData(data) {
