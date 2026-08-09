@@ -203,7 +203,7 @@ function persist(part){
   store.set(KEYS[part], state[part]);
   if(typeof cloudSync!=='undefined' && cloudSync.connected && !cloudSync.applyingRemote) cloudSync.pushDebounced();
 }
-// (2026-07-13) Global 5-second high-contrast undo snackbar helper; prev: 3-second dark toast
+// (2026-07-13) High-contrast dark undo snackbar with explicit inline styles; prev: white background conflict
 let activeUndoTimer = null;
 let activeUndoInterval = null;
 function triggerUndoSnackbar(message, restoreFn){
@@ -214,14 +214,14 @@ function triggerUndoSnackbar(message, restoreFn){
 
   const snackbar = document.createElement('div');
   snackbar.id = 'undoSnackbar';
-  snackbar.className = 'fixed bottom-24 left-1/2 -translate-x-1/2 z-[100] bg-[#14261C] text-white px-5 py-3.5 rounded-2xl shadow-2xl flex items-center justify-between gap-4 text-[14px] font-semibold border-2 border-mint/40 max-w-[90vw] min-w-[280px] animate-bounce-in';
+  snackbar.style.cssText = 'position:fixed; bottom:max(5.5rem, calc(4.5rem + env(safe-area-inset-bottom))); left:50%; transform:translateX(-50%); z-index:99999; background-color:#14261C !important; color:#FFFFFF !important; padding:12px 18px; border-radius:18px; box-shadow:0 10px 25px rgba(0,0,0,0.35); display:flex; align-items:center; justify-content:space-between; gap:16px; font-size:13.5px; font-weight:600; border:2px solid #2F9E5B; max-width:92vw; min-width:300px;';
   
   let seconds = 5;
   snackbar.innerHTML = `
-    <span class="text-white drop-shadow-xs truncate">${message}</span>
-    <button id="btnUndoAction" type="button" class="bg-forest hover:bg-forest/90 text-white text-[13px] font-bold px-3.5 py-1.5 rounded-xl transition-all flex items-center gap-2 cursor-pointer shadow-md border border-white/20 flex-shrink-0">
-      <span>Undo</span>
-      <span id="undoCountdown" class="bg-white/25 text-white px-2 py-0.5 rounded-md text-[11px] font-mono font-bold">5s</span>
+    <span style="color:#FFFFFF !important; font-size:13.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${message}</span>
+    <button id="btnUndoAction" type="button" style="background-color:#2F9E5B !important; color:#FFFFFF !important; font-size:12.5px; font-weight:700; padding:7px 14px; border-radius:12px; border:1px solid rgba(255,255,255,0.3); cursor:pointer; display:flex; align-items:center; gap:8px; flex-shrink:0; box-shadow:0 2px 6px rgba(0,0,0,0.2);">
+      <span style="color:#FFFFFF !important;">Undo</span>
+      <span id="undoCountdown" style="background-color:rgba(255,255,255,0.25) !important; color:#FFFFFF !important; font-family:monospace; font-weight:700; font-size:11px; padding:2px 6px; border-radius:6px;">5s</span>
     </button>
   `;
 

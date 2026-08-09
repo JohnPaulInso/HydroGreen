@@ -83,12 +83,23 @@ const cloudSync = {
     if(!this.auth || !this.fns.GoogleAuthProvider){ showToast('Sign-in is not ready yet — try again in a moment','clay','alert-triangle'); return; }
     try {
       const provider = new this.fns.GoogleAuthProvider();
-      const result = await this.fns.signInWithPopup(this.auth, provider);
+      let result;
+      // (2026-07-13) Support Capacitor Android WebView fallback (signInWithRedirect); prev: popup-only
+      try {
+        result = await this.fns.signInWithPopup(this.auth, provider);
+      } catch(popupErr){
+        if(popupErr.code==='auth/popup-blocked'||popupErr.code==='auth/operation-not-supported-in-this-environment'||popupErr.code==='auth/unauthorized-domain'){
+          if(this.fns.signInWithRedirect){
+            await this.fns.signInWithRedirect(this.auth, provider);
+            return null;
+          }
+        }
+        throw popupErr;
+      }
       showToast(`Signed in as ${result.user.displayName||result.user.email}`,'forest','check-circle-2');
       return result.user;
     } catch(err) {
       console.error('Google sign-in failed:', err);
-      // (2026-07-13) Return null on sign-in error (was throw err)
       if(err.code === 'auth/unauthorized-domain') showToast('Domain not authorized in Firebase Console (' + window.location.hostname + ')', 'clay', 'alert-triangle');
       else if(err.code!=='auth/popup-closed-by-user') showToast('Sign-in failed: '+err.message,'clay','alert-triangle');
       return null;

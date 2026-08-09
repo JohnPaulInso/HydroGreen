@@ -20,8 +20,15 @@ input, textarea, [contenteditable]{
 button, a, [role="button"], .tab-btn, .nav-btn{ touch-action:manipulation; }
 ::selection{ background:#DCF5E3; }
 
-/* (2026-07-13) Fix bottom margin on all pages; prev: no explicit margin */
-.page{ animation: pageFadeIn .3s ease; margin-bottom: 6rem; padding-bottom: 6rem; }
+/* (2026-07-13) Capacitor safe area insets for Android status bar cutout & 3-button navigation bar; prev: static 6rem */
+.page{
+  animation: pageFadeIn .3s ease;
+  margin-bottom: max(6rem, calc(5rem + env(safe-area-inset-bottom)));
+  padding-bottom: max(6rem, calc(5rem + env(safe-area-inset-bottom)));
+}
+#appHeader { padding-top: max(0.75rem, env(safe-area-inset-top)); }
+#bottomNav { padding-bottom: max(0.5rem, env(safe-area-inset-bottom)); }
+#undoSnackbar { bottom: max(5.5rem, calc(4.5rem + env(safe-area-inset-bottom))); }
 @keyframes pageFadeIn{ from{opacity:0; transform:translateY(8px)} to{opacity:1; transform:translateY(0)} }
 @media (prefers-reduced-motion: reduce){ .page{animation:none} }
 
