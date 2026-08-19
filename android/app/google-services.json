@@ -14,11 +14,11 @@
       },
       "oauth_client": [
         {
-          "client_id": "222210946101-e24hjq2kueugn4klr6et4ije1ohgst60.apps.googleusercontent.com",
+          "client_id": "222210946101-hgjcmfvs85nf2pnuadciflbbmd035rfs.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
             "package_name": "com.hydrotrack.app",
-            "certificate_hash": "a09cb9886426bae73387327d29a0c7ad3e7afd1c"
+            "certificate_hash": "ed3613b1ca6dde62455885d2c5615059d720632d"
           }
         },
         {

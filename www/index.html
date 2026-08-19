@@ -3,62 +3,100 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover">
-<title>HydroTrack — TowerCrop</title>
-<meta name="description" content="Hydroponic tower manager: growth tracking, reminders, expenses & ROI.">
+<!-- (2026-07-13) Set exact title to HydroGreen; prev: em dash -->
+<title>HydroGreen - Track Hydroponic Tower and Trays</title>
+<meta name="description" content="Track hydroponic towers, seedling nursery trays, light schedules, expenses and crop harvests with HydroGreen.">
 <meta name="theme-color" content="#14532D">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="HydroTrack">
+<meta name="apple-mobile-web-app-title" content="HydroGreen">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="assets/icons/icon-192.png">
 <!-- (2026-07-13) Use uploaded exact lettuce image for favicon; prev: svg favicon -->
 <link rel="icon" type="image/png" href="assets/icons/logo.png">
 <link rel="stylesheet" href="css/tailwind.css">
 <link rel="stylesheet" href="css/app.css">
+<!-- (2026-07-13) Add Google One Tap GIS SDK; prev: missing GIS script -->
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body class="bg-cream text-ink font-body">
 <a href="#mainContent" class="skip-link">Skip to main content</a>
 
+<!-- (2026-07-13) Use SVG circular spinner with continuous animate-spin; prev: div -->
+<div id="pullToRefreshContainer" class="fixed left-0 right-0 flex items-center justify-center pointer-events-none transition-all duration-200 ease-out w-full" style="position:fixed;top:calc(56px + env(safe-area-inset-top) + 4px);left:0;right:0;width:100%;display:flex;align-items:center;justify-content:center;transform:translateY(-150px) scale(0.6);opacity:0;margin:0 auto;z-index:999 !important;">
+  <div id="pullToRefreshCard" class="bg-white rounded-full w-10 h-10 shadow-2xl flex items-center justify-center border border-forest/20" style="width:40px;height:40px;margin:0 auto;box-shadow:0 8px 24px rgba(0,0,0,0.22);">
+    <svg id="pullToRefreshSpinner" class="w-5 h-5 text-forest animate-spin" style="width:20px;height:20px;flex-shrink:0;" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"></circle>
+      <path class="opacity-85" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+    </svg>
+  </div>
+</div>
+
 <!-- ============ LOGIN OVERLAY ============ -->
-<!-- (2026-07-13) Fix login overlay full screen position; prev: relative positioning -->
-<div id="authOverlay" class="hidden fixed inset-0 bg-forest flex items-center justify-center p-6 overflow-hidden" style="position:fixed; top:0; left:0; width:100vw; height:100vh; z-index:99999;" role="dialog" aria-modal="true" aria-labelledby="authOverlayTitle">
-  <!-- Subtle decorative background leaves -->
-  <svg viewBox="0 0 100 100" aria-hidden="true" class="absolute pointer-events-none" style="top:-30px; left:-30px; width:160px; height:160px; opacity:0.06; fill:#FFFFFF;">
-    <path d="M50 5 C20 35 15 65 50 95 C85 65 80 35 50 5 Z" />
-  </svg>
-  <svg viewBox="0 0 100 100" aria-hidden="true" class="absolute pointer-events-none" style="bottom:-40px; right:-40px; width:200px; height:200px; opacity:0.06; fill:#FFFFFF; transform:rotate(45deg);">
-    <path d="M50 5 C20 35 15 65 50 95 C85 65 80 35 50 5 Z" />
-  </svg>
-  <svg viewBox="0 0 100 100" aria-hidden="true" class="absolute pointer-events-none" style="top:20%; right:10px; width:80px; height:80px; opacity:0.04; fill:#FFFFFF; transform:rotate(-20deg);">
-    <path d="M50 5 C20 35 15 65 50 95 C85 65 80 35 50 5 Z" />
-  </svg>
-  <svg viewBox="0 0 100 100" aria-hidden="true" class="absolute pointer-events-none" style="bottom:20%; left:10px; width:90px; height:90px; opacity:0.04; fill:#FFFFFF; transform:rotate(20deg);">
-    <path d="M50 5 C20 35 15 65 50 95 C85 65 80 35 50 5 Z" />
+<!-- (2026-07-13) Add ID to authOverlayInlineStyle tag; prev: anonymous style -->
+<script>if(localStorage.getItem('ht_logged_in')==='true'){document.write('<style id="authOverlayInlineStyle">#authOverlay{display:none !important;}</style>');}</script>
+<div id="authOverlay" class="fixed inset-0 flex items-center justify-center p-6 overflow-hidden" style="position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:99999;background:radial-gradient(circle at 50% 30%, #17422b 0%, #0d2c1c 60%, #06170e 100%);padding-top:max(1.5rem, env(safe-area-inset-top));" role="dialog" aria-modal="true" aria-labelledby="authOverlayTitle">
+
+  <!-- Ambient emerald center lighting -->
+  <div aria-hidden="true" class="absolute inset-0 pointer-events-none" style="background:radial-gradient(ellipse 65% 50% at 50% 45%, rgba(52,211,153,0.14) 0%, transparent 75%);"></div>
+
+  <!-- Top-left subtle botanical leaf vector -->
+  <svg aria-hidden="true" class="absolute pointer-events-none" style="top:0;left:0;width:180px;height:180px;opacity:0.1;" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M10 90C10 90 20 40 50 20C80 0 90 0 90 0C90 0 70 30 50 60C30 90 10 90 10 90Z" fill="#34D399"/>
+    <path d="M50 20C40 35 30 45 15 50" stroke="#059669" stroke-width="1"/>
+    <path d="M70 30C60 45 50 55 30 70" stroke="#059669" stroke-width="1"/>
   </svg>
 
-  <div class="w-full max-w-sm text-center relative z-10">
-    <div class="w-16 h-16 mx-auto mb-5">
-      <!-- (2026-07-13) Use exact uploaded lettuce PNG image for onboarding logo; prev: SVG -->
-      <img src="assets/icons/logo.png" alt="HydroTrack Logo" class="w-full h-full object-contain">
+  <!-- Bottom-right subtle botanical leaf vector -->
+  <svg aria-hidden="true" class="absolute pointer-events-none" style="bottom:0;right:0;width:180px;height:180px;opacity:0.1;transform:rotate(180deg);" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M10 90C10 90 20 40 50 20C80 0 90 0 90 0C90 0 70 30 50 60C30 90 10 90 10 90Z" fill="#34D399"/>
+    <path d="M50 20C40 35 30 45 15 50" stroke="#059669" stroke-width="1"/>
+    <path d="M70 30C60 45 50 55 30 70" stroke="#059669" stroke-width="1"/>
+  </svg>
+
+  <!-- Fine dot grid texture -->
+  <svg aria-hidden="true" class="absolute inset-0 pointer-events-none w-full h-full" xmlns="http://www.w3.org/2000/svg" style="opacity:0.06;">
+    <defs>
+      <pattern id="botanicalgrid" x="0" y="0" width="24" height="24" patternUnits="userSpaceOnUse">
+        <circle cx="2" cy="2" r="1" fill="#34D399"/>
+      </pattern>
+    </defs>
+    <rect width="100%" height="100%" fill="url(#botanicalgrid)"/>
+  </svg>
+
+  <!-- Glassmorphic content card -->
+  <!-- id="onboardingContentCard" - Glass container for onboarding content -->
+  <div id="onboardingContentCard" class="onboarding-card animate-fade-in" style="width:100%;max-width:380px;margin:0 auto;text-align:center;position:relative;z-index:10;background:rgba(10,32,20,0.85);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(74,222,128,0.25);border-radius:24px;padding:32px 24px;box-shadow:0 20px 50px rgba(0,0,0,0.6);">
+
+    <!-- id="onboardingLogoWrapper" - Logo wrapper with emerald glow -->
+    <div id="onboardingLogoWrapper" class="onboarding-logo-box" style="width:76px;height:76px;max-width:76px;max-height:76px;margin:0 auto 20px auto;display:flex;align-items:center;justify-content:center;border-radius:22px;background:radial-gradient(circle, rgba(74,222,128,0.22) 0%, rgba(20,83,45,0.45) 100%);border:1px solid rgba(74,222,128,0.35);box-shadow:0 0 30px rgba(74,222,128,0.3);">
+      <!-- (2026-07-13) Apply HydroGreen branding to UI headers; prev: HydroTrack -->
+      <img src="assets/icons/logo.png" alt="HydroGreen Logo" class="onboarding-logo-img" style="width:48px;height:48px;max-width:48px;max-height:48px;object-fit:contain;display:block;margin:0 auto;">
     </div>
-    <h1 id="authOverlayTitle" class="font-display text-[24px] font-bold text-white mb-2">Welcome to HydroTrack</h1>
-    <p class="text-white/75 text-[13.5px] mb-8 leading-relaxed">Sign in with Google to access your hydroponic towers and sync your data seamlessly across all your devices.</p>
 
-    <div id="authOverlayLoading" class="hidden flex flex-col items-center gap-3 py-4">
-      <div class="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-      <span class="text-white/60 text-[12.5px]">Checking sign-in status…</span>
+    <h1 id="authOverlayTitle" class="onboarding-title" style="font-size:24px;font-weight:800;color:#ffffff;margin-bottom:10px;letter-spacing:-0.4px;text-shadow:0 2px 10px rgba(0,0,0,0.4);">Welcome to HydroGreen</h1>
+    <p class="onboarding-desc" style="color:rgba(236,253,245,0.85);font-size:13.5px;line-height:1.55;margin-bottom:28px;">Track hydroponic towers and seedling nursery trays across your devices.</p>
+
+    <!-- (2026-07-13) Hide spinner by default; prev: visible loading -->
+    <div id="authOverlayLoading" class="hidden flex flex-col items-center gap-3 py-3">
+      <div class="w-6 h-6 border-2 border-emerald-400/30 border-t-emerald-400 rounded-full animate-spin" style="width:24px;height:24px;border:2px solid rgba(52,211,153,0.3);border-top-color:#34d399;border-radius:50%;"></div>
+      <span style="color:rgba(209,250,229,0.7);font-size:12.5px;">Checking sign-in status…</span>
     </div>
 
-    <div id="authOverlayButtons" class="hidden flex flex-col gap-3">
-      <div id="authOverlayError" class="hidden bg-white/10 text-white/80 text-[12px] rounded-lg px-3 py-2 mb-1">Could not complete sign-in — please try again.</div>
-      <button id="btnOverlayGoogleSignIn" type="button" class="w-full bg-white text-ink font-semibold text-[14px] py-3 rounded-xl flex items-center justify-center gap-2.5 hover:bg-white/90 transition-colors shadow-md">
-        <svg class="w-[18px] h-[18px]" viewBox="0 0 24 24"><path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"/><path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.29v3.15C3.26 21.3 7.31 24 12 24z"/><path fill="#FBBC05" d="M5.28 14.24c-.25-.72-.38-1.49-.38-2.24s.13-1.52.38-2.24V6.61H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.39l3.99-3.15z"/><path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.61l3.99 3.15c.95-2.85 3.6-4.96 6.72-4.96z"/></svg>
+    <!-- (2026-07-13) Clean onboarding card without debug console; prev: console box -->
+    <div id="authOverlayButtons" class="flex flex-col gap-3">
+      <div id="authOverlayError" class="hidden bg-red-500/20 border border-red-500/30 text-red-200 text-[12px] rounded-xl px-3 py-2.5 mb-1">Could not complete sign-in — please try again.</div>
+
+      <!-- (2026-07-13) Clean button binding via JS listener; prev: duplicate inline onclick -->
+      <button id="btnOverlayGoogleSignIn" type="button" class="onboarding-btn-google" style="width:100%;background:#ffffff;color:#0f3822;font-weight:700;font-size:14px;padding:14px 16px;border-radius:16px;display:flex;align-items:center;justify-content:center;gap:10px;box-shadow:0 4px 18px rgba(0,0,0,0.35);border:none;cursor:pointer;position:relative;z-index:50;pointer-events:auto;">
+        <svg class="w-[18px] h-[18px]" style="width:18px;height:18px;" viewBox="0 0 24 24"><path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"/><path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.29v3.15C3.26 21.3 7.31 24 12 24z"/><path fill="#FBBC05" d="M5.28 14.24c-.25-.72-.38-1.49-.38-2.24s.13-1.52.38-2.24V6.61H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.39l3.99-3.15z"/><path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.61l3.99 3.15c.95-2.85 3.6-4.96 6.72-4.96z"/></svg>
         Sign in with Google
       </button>
     </div>
   </div>
 </div>
+
 
 <div id="app" class="min-h-screen md:flex">
 
@@ -67,11 +105,11 @@
     <div class="flex items-center gap-2.5 mb-9 pl-1">
       <div class="w-9 h-9 flex-shrink-0 flex items-center justify-center">
         <!-- (2026-07-13) Use exact uploaded lettuce PNG image for desktop logo; prev: SVG -->
-        <img src="assets/icons/logo.png" alt="HydroTrack Logo" class="w-full h-full object-contain">
+        <img src="assets/icons/logo.png" alt="HydroGreen Logo" class="w-full h-full object-contain">
       </div>
       <div>
-        <div class="font-display font-semibold text-[17px] leading-tight">HydroTrack</div>
-        <div class="text-[11px] text-white/50 -mt-0.5 tracking-wide">TowerCrop System</div>
+        <div class="font-display font-semibold text-[17px] leading-tight">HydroGreen</div>
+        <div class="text-[11px] text-white/50 -mt-0.5 tracking-wide">Tower & Tray Tracker</div>
       </div>
     </div>
 
@@ -84,34 +122,119 @@
       <button class="nav-btn flex items-center gap-3 px-3 py-2.5 rounded-lg text-[14px] font-medium text-white/90 hover:bg-white/10" data-page="tools"></button>
     </nav>
 
+    <!-- (2026-07-13) Hide Firebase label in desktop sync status; prev: Firebase -->
     <button id="signInStubDesktop" class="flex items-center gap-2.5 px-3 py-2.5 rounded-lg bg-white/10 hover:bg-white/15 text-[13px] text-white/85">
       <span class="relative flex-shrink-0">
         <span id="syncStatusDot" class="w-2.5 h-2.5 rounded-full inline-block" style="background:#B7C2BA"></span>
         <span class="sync-pulse hidden absolute inset-0 rounded-full" style="background:#2F9E5B"></span>
       </span>
-      <span class="text-left leading-tight"><span id="syncStatusLabel">Offline — local only</span><br><span class="text-white/50 text-[11px]">Tap to manage Firebase sync</span></span>
+      <span class="text-left leading-tight"><span id="syncStatusLabel">Offline — local only</span><br><span class="text-white/50 text-[11px]">Tap to manage cloud account</span></span>
     </button>
   </aside>
 
   <!-- ============ MOBILE TOP BAR ============ -->
-  <header class="md:hidden sticky top-0 z-30 bg-forest text-white px-4 py-3 flex items-center justify-between shadow-card">
+  <!-- (2026-07-13) Fixed appHeader with top padding on mainContent; prev: sticky header -->
+  <header id="appHeader" class="md:hidden fixed top-0 inset-x-0 bg-forest text-white px-4 py-3 flex items-center justify-between shadow-card" style="z-index:1000 !important; overscroll-behavior:none;">
     <div class="flex items-center gap-2">
       <div class="w-8 h-8 flex-shrink-0 flex items-center justify-center">
         <!-- (2026-07-13) Use exact uploaded lettuce PNG image for mobile logo; prev: SVG -->
-        <img src="assets/icons/logo.png" alt="HydroTrack Logo" class="w-full h-full object-contain">
+        <img src="assets/icons/logo.png" alt="HydroGreen Logo" class="w-full h-full object-contain">
       </div>
-      <span class="font-display font-semibold text-[16px]">HydroTrack</span>
+      <span class="font-display font-semibold text-[16px]">HydroGreen</span>
     </div>
-    <button id="signInStubMobile" class="p-2 rounded-lg bg-white/10 cloud-icon-mobile relative">
-      <span id="syncStatusDotMobile" class="w-2 h-2 rounded-full absolute -top-0.5 -right-0.5" style="background:#B7C2BA"></span>
-    </button>
+    <!-- (2026-07-13) Remove signInStubMobile button; prev: signInStubMobile -->
   </header>
 
   <!-- ============ MAIN ============ -->
-  <main id="mainContent" tabindex="-1" class="flex-1 md:ml-64 px-4 py-5 md:px-10 md:py-9 pb-32 md:pb-20 max-w-6xl mx-auto w-full">
+  <!-- (2026-07-13) Set 4.75rem top padding for clean clearance under fixed appHeader; prev: 3.5rem -->
+  <main id="mainContent" tabindex="-1" class="flex-1 md:ml-64 px-4 pt-[calc(4.75rem+env(safe-area-inset-top))] pb-5 md:px-10 md:py-9 md:pb-20 max-w-6xl mx-auto w-full">
 
     <!-- ---------- DASHBOARD ---------- -->
-    <section id="page-dashboard" class="page pb-32 mb-16">
+    <section id="page-dashboard" class="page relative mb-16">
+      <!-- (2026-07-13) Match 1-to-1 exact height & layout of dashboard components -->
+      <div id="dashboardSkeletonOverlay" class="absolute inset-0 z-50 pointer-events-none" style="background:#F9FAF8;opacity:1;">
+        
+        <!-- (2026-07-13) Place View Tower skeleton button under date; prev: right side -->
+        <div class="flex flex-col md:flex-row items-start md:items-end justify-between mb-6 gap-3">
+          <div>
+            <div class="skeleton-shimmer" style="height:32px;width:220px;margin-bottom:6px;border-radius:8px;"></div>
+            <div class="skeleton-shimmer" style="height:16px;width:150px;margin-bottom:10px;border-radius:6px;"></div>
+            <div class="skeleton-shimmer" style="height:36px;width:115px;border-radius:8px;"></div>
+          </div>
+        </div>
+
+        <!-- (2026-07-13) Remove green banner skeleton from dashboard; prev: in dashboard -->
+
+        <!-- 4 Stat Cards responsive skeleton grid matching #dashboardStatsGrid (exact height ~136px) -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-8">
+          <div class="stat-card bg-white rounded-2xl p-4 border border-line flex flex-col justify-between" style="min-height:136px;box-shadow:0 2px 8px rgba(0,0,0,0.03);">
+            <div class="skeleton-shimmer" style="width:36px;height:36px;border-radius:10px;margin-bottom:12px;"></div>
+            <div>
+              <div class="skeleton-shimmer" style="height:28px;width:75px;margin-bottom:6px;border-radius:6px;"></div>
+              <div class="skeleton-shimmer" style="height:14px;width:110px;margin-bottom:4px;border-radius:4px;"></div>
+              <div class="skeleton-shimmer" style="height:12px;width:75px;border-radius:4px;"></div>
+            </div>
+          </div>
+          <div class="stat-card bg-white rounded-2xl p-4 border border-line flex flex-col justify-between" style="min-height:136px;box-shadow:0 2px 8px rgba(0,0,0,0.03);">
+            <div class="skeleton-shimmer" style="width:36px;height:36px;border-radius:10px;margin-bottom:12px;"></div>
+            <div>
+              <div class="skeleton-shimmer" style="height:28px;width:75px;margin-bottom:6px;border-radius:6px;"></div>
+              <div class="skeleton-shimmer" style="height:14px;width:110px;margin-bottom:4px;border-radius:4px;"></div>
+              <div class="skeleton-shimmer" style="height:12px;width:75px;border-radius:4px;"></div>
+            </div>
+          </div>
+          <div class="stat-card bg-white rounded-2xl p-4 border border-line flex flex-col justify-between" style="min-height:136px;box-shadow:0 2px 8px rgba(0,0,0,0.03);">
+            <div class="skeleton-shimmer" style="width:36px;height:36px;border-radius:10px;margin-bottom:12px;"></div>
+            <div>
+              <div class="skeleton-shimmer" style="height:28px;width:75px;margin-bottom:6px;border-radius:6px;"></div>
+              <div class="skeleton-shimmer" style="height:14px;width:110px;margin-bottom:4px;border-radius:4px;"></div>
+              <div class="skeleton-shimmer" style="height:12px;width:75px;border-radius:4px;"></div>
+            </div>
+          </div>
+          <div class="stat-card bg-white rounded-2xl p-4 border border-line flex flex-col justify-between" style="min-height:136px;box-shadow:0 2px 8px rgba(0,0,0,0.03);">
+            <div class="skeleton-shimmer" style="width:36px;height:36px;border-radius:10px;margin-bottom:12px;"></div>
+            <div>
+              <div class="skeleton-shimmer" style="height:28px;width:75px;margin-bottom:6px;border-radius:6px;"></div>
+              <div class="skeleton-shimmer" style="height:14px;width:110px;margin-bottom:4px;border-radius:4px;"></div>
+              <div class="skeleton-shimmer" style="height:12px;width:75px;border-radius:4px;"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Today's Tasks skeleton card matching #todaysTasksCard (with progress bar & 4 task rows) -->
+        <div class="bg-white rounded-2xl p-5 border border-line mb-8 shadow-card">
+          <div class="flex items-center justify-between mb-2">
+            <div class="skeleton-shimmer" style="height:22px;width:130px;border-radius:6px;"></div>
+            <div class="skeleton-shimmer" style="height:16px;width:30px;border-radius:4px;"></div>
+          </div>
+          <!-- Progress bar line -->
+          <div class="skeleton-shimmer" style="height:6px;width:100%;border-radius:999px;margin:12px 0 16px 0;"></div>
+          <div class="space-y-1">
+            <div class="flex items-center gap-3 py-2.5 border-b border-line/60">
+              <div class="skeleton-shimmer" style="width:20px;height:20px;border-radius:6px;flex-shrink:0;"></div>
+              <div class="skeleton-shimmer" style="width:28px;height:28px;border-radius:8px;flex-shrink:0;"></div>
+              <div class="skeleton-shimmer flex-1" style="height:16px;max-width:260px;border-radius:4px;"></div>
+            </div>
+            <div class="flex items-center gap-3 py-2.5 border-b border-line/60">
+              <div class="skeleton-shimmer" style="width:20px;height:20px;border-radius:6px;flex-shrink:0;"></div>
+              <div class="skeleton-shimmer" style="width:28px;height:28px;border-radius:8px;flex-shrink:0;"></div>
+              <div class="skeleton-shimmer flex-1" style="height:16px;max-width:210px;border-radius:4px;"></div>
+            </div>
+            <div class="flex items-center gap-3 py-2.5 border-b border-line/60">
+              <div class="skeleton-shimmer" style="width:20px;height:20px;border-radius:6px;flex-shrink:0;"></div>
+              <div class="skeleton-shimmer" style="width:28px;height:28px;border-radius:8px;flex-shrink:0;"></div>
+              <div class="skeleton-shimmer flex-1" style="height:16px;max-width:240px;border-radius:4px;"></div>
+            </div>
+            <div class="flex items-center gap-3 py-2.5">
+              <div class="skeleton-shimmer" style="width:20px;height:20px;border-radius:6px;flex-shrink:0;"></div>
+              <div class="skeleton-shimmer" style="width:28px;height:28px;border-radius:8px;flex-shrink:0;"></div>
+              <div class="skeleton-shimmer flex-1" style="height:16px;max-width:190px;border-radius:4px;"></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
       <div id="dashboardHeader" class="flex items-end justify-between mb-6 flex-wrap gap-3">
         <div id="dashboardGreeting" class="dashboard-greeting">
           <h1 class="font-display text-[26px] md:text-[30px] font-semibold text-forest">Good day, Grower</h1>
@@ -122,15 +245,7 @@
 
       <div id="alertBanner" class="hidden banner-enter mb-5"></div>
 
-      <div id="firstPlantPrompt" class="hidden banner-enter mb-5 bg-forest text-white rounded-2xl p-4 flex items-center gap-3 flex-wrap">
-        <span id="bellRingIcon" class="w-9 h-9 rounded-lg bg-white/15 flex items-center justify-center flex-shrink-0"></span>
-        <div id="firstPlantPromptContent" class="flex-1 min-w-[200px]">
-          <div class="font-semibold text-[14px]">Reminders are switched on</div>
-          <div class="text-[12px] text-white/75">Turn on real browser alerts for your 7AM / 11AM / 6PM schedule.</div>
-        </div>
-        <button id="btnEnableNotifsPrompt" class="text-[12.5px] font-semibold bg-white text-forest px-3.5 py-2 rounded-lg">Enable Notifications</button>
-        <button id="btnDismissFirstPlant" class="text-[12.5px] font-medium text-white/70 px-2">Not now</button>
-      </div>
+
 
       <div id="dashboardStatsGrid" class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-8">
         <div id="statCardPlants" class="stat-card bg-white rounded-2xl shadow-card p-4 border border-line">
@@ -155,6 +270,18 @@
         </div>
       </div>
 
+      <!-- (2026-07-13) Dashboard rain warning alert banner container; prev: none -->
+      <div id="dashboardWeatherRainBanner" class="hidden mb-5 bg-[#FEF3C7] border border-[#F59E0B] rounded-2xl p-4 flex items-center justify-between gap-3 text-[#92400E]">
+        <div class="flex items-center gap-3">
+          <span class="w-10 h-10 rounded-xl bg-[#F59E0B]/20 text-[#D97706] flex items-center justify-center flex-shrink-0 font-bold text-[18px]">🌧️</span>
+          <div>
+            <div class="font-semibold text-[14px]">High Rain Risk Warning (>50% Probability)</div>
+            <div class="text-[12px] opacity-90">Heavy rainfall detected — move vulnerable seedling trays under shelter!</div>
+          </div>
+        </div>
+        <button id="btnDismissRainBanner" type="button" class="text-[12px] font-semibold bg-white/80 hover:bg-white px-3 py-1.5 rounded-lg border border-[#F59E0B]/40 transition-colors flex-shrink-0">Dismiss</button>
+      </div>
+
       <div id="dashboardMainContent" class="grid md:grid-cols-5 gap-5 mb-5">
         <div id="todaysTasksCard" class="md:col-span-3 bg-white rounded-2xl shadow-card border border-line p-5">
           <div id="tasksHeader" class="flex items-center justify-between mb-1">
@@ -164,10 +291,11 @@
           <div id="taskProgressBarContainer" class="w-full h-1.5 bg-line rounded-full mb-4 overflow-hidden"><div id="taskProgressBar" class="h-full bg-leaf rounded-full transition-all" style="width:0%"></div></div>
           <div id="taskList" class="flex flex-col gap-2"></div>
         </div>
-        <div id="growthGalleryCard" class="md:col-span-2 bg-white rounded-2xl shadow-card border border-line p-5">
+        <!-- (2026-07-13) Add bottom padding to growth gallery card; prev: p-5 -->
+        <div id="growthGalleryCard" class="md:col-span-2 bg-white rounded-2xl shadow-card border border-line p-5 pb-7">
           <h2 class="font-display font-semibold text-[17px] text-forest mb-4">Growth Gallery</h2>
           <p class="text-[12.5px] text-ink-soft mb-3">How your crop changes look, stage by stage.</p>
-          <div id="galleryStrip" class="grid grid-cols-3 gap-2.5"></div>
+          <div id="galleryStrip" class="grid grid-cols-3 gap-2.5 pb-1"></div>
         </div>
       </div>
 
@@ -226,7 +354,7 @@
 
 <!-- (2026-07-13) Remove towerLegend and add Growth Gallery; prev: towerLegend -->
 <!-- (2026-07-13) Multi-tower header & move btnAddRow to instructions; prev: single header -->
-    <section id="page-tower" class="page hidden pb-32 mb-16">
+    <section id="page-tower" class="page hidden   mb-16">
 <!-- (2026-07-13) Fix tower header layout & remove duplicate plus; prev: cluttered -->
       <div id="towerHeader" class="flex flex-col gap-2.5 mb-3">
         <div class="flex items-center justify-between gap-2 flex-wrap">
@@ -238,24 +366,59 @@
         </div>
         <p class="text-ink-soft text-[12.5px] font-mono" id="towerMeta"></p>
       </div>
-      <div id="towerControls" class="mt-1 flex items-center gap-2 max-w-md">
+      <div id="towerControls" class="mt-1 flex items-center gap-2 max-w-md mb-4">
         <span id="searchIcon" class="text-ink-soft flex-shrink-0" data-icon="search"></span>
         <input id="towerSearch" type="text" placeholder="Highlight a variety…" class="w-full border border-line rounded-lg px-3 py-1.5 text-[12.5px] bg-white">
         <button id="btnToggleSelectMode" class="flex-shrink-0 text-[12px] font-semibold text-forest bg-mint px-3 py-1.5 rounded-lg flex items-center gap-1.5 whitespace-nowrap" data-icon="check-circle-2">Select</button>
       </div>
 
+      <!-- (2026-07-13) Restore towerVisualizerCard wrapper div & spacing; prev: unclosed div -->
       <div id="towerVisualizerCard" class="mt-4 bg-white rounded-2xl shadow-card border border-line p-5 md:p-7">
-        <div id="towerDiagram" class="mx-auto touch-none"></div>
+        <!-- (2026-07-13) Prevent touch scroll during drag select; prev: touch-pan-y -->
+        <div id="towerDiagram" class="mx-auto touch-none" style="touch-action:none;"></div>
         <div class="flex items-center justify-between mt-3 pt-3 border-t border-line/60 gap-3 flex-wrap">
           <p id="towerInstructions" class="text-[11.5px] text-ink-soft flex-1 min-w-[180px]">Tap a pocket to edit it · press and hold, then drag, to select several at once.</p>
           <button id="btnAddRow" type="button" class="text-[12.5px] font-semibold text-white bg-forest px-3.5 py-2 rounded-lg flex items-center gap-1.5 flex-shrink-0" data-icon="list-plus">Add Row</button>
         </div>
       </div>
 
-      <div id="growthGalleryCardTower" class="mt-4 bg-white rounded-2xl shadow-card border border-line p-5">
+      <div id="growthGalleryCardTower" class="mt-4 bg-white rounded-2xl shadow-card border border-line p-5 pb-7">
         <h2 class="font-display font-semibold text-[17px] text-forest mb-1">Growth Gallery</h2>
         <p class="text-[12.5px] text-ink-soft mb-3">How your crop changes look, stage by stage.</p>
-        <div id="galleryStripTower" class="grid grid-cols-3 sm:grid-cols-6 gap-2.5"></div>
+        <div id="galleryStripTower" class="grid grid-cols-3 sm:grid-cols-6 gap-2.5 pb-1"></div>
+      </div>
+
+      <!-- (2026-07-13) Add view mode toggle and list container; prev: grid only -->
+      <div id="towerPhotoHistoryCard" class="bg-white rounded-2xl shadow-card border border-line p-4 md:p-5 mt-4">
+        <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+          <div>
+            <h2 class="font-display font-semibold text-[17px] text-forest flex items-center gap-2">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4 text-forest"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg>
+              Tower Photo History
+            </h2>
+            <p class="text-[12px] text-ink-soft mt-0.5">Growth log — tap any photo to view full details.</p>
+          </div>
+          <div class="flex items-center gap-2 flex-wrap">
+            <div class="flex items-center gap-1 bg-cream/70 p-1 rounded-xl border border-line/60">
+              <button id="btnPhotoViewGrid" type="button" class="px-2.5 py-1 rounded-lg text-[11.5px] font-semibold bg-white text-forest shadow-xs border border-line/40 transition-all">Grid</button>
+              <button id="btnPhotoViewList" type="button" class="px-2.5 py-1 rounded-lg text-[11.5px] font-semibold text-ink-soft hover:text-forest bg-transparent transition-all">List</button>
+            </div>
+            <span id="photoLogCount" class="text-[11px] font-mono text-ink-soft bg-cream px-2.5 py-1 rounded-full border border-line/60">0 photos</span>
+            <label id="galleryAddPhotoLabel" class="cursor-pointer text-[12px] font-semibold text-white bg-forest hover:bg-forest/90 px-3.5 py-1.5 rounded-xl flex items-center gap-1.5 shadow-sm transition-all">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-3.5 h-3.5"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+              Add Photo
+              <input id="galleryPhotoInput" type="file" accept="image/*" multiple class="hidden">
+            </label>
+          </div>
+        </div>
+        <div id="towerPhotoGalleryGrid" class="grid grid-cols-3 gap-2.5"></div>
+        <div id="towerPhotoGalleryList" class="hidden flex flex-col gap-4"></div>
+        <button id="btnLoadMorePhotos" type="button" class="hidden w-full mt-3 py-2.5 bg-mint/50 hover:bg-mint text-forest text-[12.5px] font-semibold rounded-xl border border-leaf/20 transition-all text-center">Load More Images</button>
+        <div id="towerPhotoGalleryEmpty" class="hidden text-center py-8 text-ink-soft text-[13px] bg-cream/30 rounded-2xl border border-dashed border-line mt-1">
+          <div class="text-2xl mb-1.5">📷</div>
+          <p class="font-medium text-ink">No growth photos logged yet</p>
+          <p class="text-[11.5px] text-ink-soft mt-0.5">Tap <strong class="text-forest font-semibold">Add Photo</strong> to start your growth history.</p>
+        </div>
       </div>
 
       <div id="rowsHeader" class="flex items-center justify-between mt-6 mb-3">
@@ -266,7 +429,7 @@
     </section>
 
     <!-- ---------- NURSERY ---------- -->
-    <section id="page-nursery" class="page hidden pb-32 mb-16">
+    <section id="page-nursery" class="page hidden mb-16">
       <div id="nurseryHeader" class="flex items-center justify-between mb-5 flex-wrap gap-3">
         <div id="nurseryTitle" class="nursery-title">
           <h1 class="font-display text-[24px] font-semibold text-forest">Seedling Nursery</h1>
@@ -283,10 +446,21 @@
     </section>
 
     <!-- ---------- REMINDERS ---------- -->
-    <section id="page-reminders" class="page hidden pb-32 mb-16">
+    <section id="page-reminders" class="page hidden   mb-16">
       <h1 class="font-display text-[24px] font-semibold text-forest mb-1">Reminders & Weather</h1>
       <p class="text-ink-soft text-[13px] mb-6">Daily light schedule, smart weather alerts, and milestone pings.</p>
       <div id="alertBanner2" class="hidden banner-enter mb-5"></div>
+
+      <!-- (2026-07-13) Move firstPlantPrompt & banner to page-reminders; prev: in dashboard -->
+      <div id="firstPlantPrompt" class="hidden banner-enter mb-5 bg-forest text-white rounded-2xl p-4 flex items-center gap-3 flex-wrap">
+        <span id="bellRingIcon" class="w-9 h-9 rounded-lg bg-white/15 flex items-center justify-center flex-shrink-0"></span>
+        <div id="firstPlantPromptContent" class="flex-1 min-w-[200px]">
+          <div class="font-semibold text-[14px]">Hydroponic Care Reminders</div>
+          <div class="text-[12px] text-white/75">Turn on native Android alerts for your 7AM / 11AM / 6PM schedule.</div>
+        </div>
+        <button id="btnEnableNotifsPrompt" class="text-[12.5px] font-semibold bg-white text-forest px-3.5 py-2 rounded-lg shadow-xs hover:bg-cream transition-all">Enable Mobile Notifications</button>
+        <button id="btnDismissFirstPlant" class="text-[12.5px] font-medium text-white/70 hover:text-white px-2">Not now</button>
+      </div>
 
 <!-- (2026-07-13) Fix time input width & row padding in Daily Light Schedule card; prev: w-[110px] clipped time text -->
       <div class="grid md:grid-cols-2 gap-5 mb-5">
@@ -299,78 +473,89 @@
               <div class="flex items-center justify-between py-3 gap-2 flex-wrap sm:flex-nowrap"><div class="min-w-0 flex-1"><div class="font-semibold text-[13.5px] text-ink">Night Darkness</div><div class="text-[12px] text-ink-soft">lights off near trays</div></div><div class="flex items-center gap-2 flex-shrink-0"><input type="time" class="reminder-time border border-line/80 rounded-lg px-2 py-1 text-[13px] font-mono bg-cream/40 min-w-[126px]" data-time-key="nightTime" value="18:00"><div class="switch" data-toggle="nightReminder" role="switch" aria-checked="false" tabindex="0"></div></div></div>
             </div>
           </div>
+          <!-- (2026-07-13) Add custom reminder manager; prev: enable notifs button -->
           <div class="mt-5 pt-4 border-t border-line/60">
-            <button id="btnEnableNotifs" class="w-full text-[12.5px] font-semibold text-forest bg-mint hover:bg-mint/70 px-3.5 py-2.5 rounded-lg flex items-center justify-center gap-1.5 transition-colors" data-icon="bell">Enable Browser Notifications</button>
-            <p class="text-[11px] text-ink-soft mt-2 text-center">Fires while this tab stays open — real push needs Firebase Cloud Messaging (see note in Tools).</p>
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-[13px] font-semibold text-forest">Custom Reminders</span>
+              <button id="btnAddCustomReminder" class="text-[11.5px] font-semibold text-forest bg-mint hover:bg-mint/80 px-2.5 py-1 rounded-lg flex items-center gap-1 transition-colors" data-icon="plus">Add</button>
+            </div>
+            <div id="customReminderList" class="flex flex-col gap-2 max-h-[180px] overflow-y-auto scrollbar-thin"></div>
           </div>
         </div>
-<!-- (2026-07-13) World-class Google Weather card redesign with segmented control pills & pill input; prev: cramped text overlap -->
-        <div id="googleWeatherCard" class="bg-white rounded-2xl shadow-card border border-line overflow-hidden">
+        <!-- (2026-07-13) Match googleWeatherCard style with app cards; prev: rounded-3xl -->
+        <div id="googleWeatherCard" class="bg-white rounded-2xl shadow-card border border-line p-5 sm:p-6 overflow-hidden flex flex-col justify-between">
+          <div>
+            <h2 class="font-display font-semibold text-[16px] text-forest mb-4 flex items-center gap-2" data-icon-label="cloud">Live Weather & Alerts</h2>
 
-          <!-- Location & Alerts Header -->
-          <div class="p-4 sm:p-5 border-b border-line/40 bg-mint/10 flex flex-col gap-3">
-            <div class="flex items-center justify-between gap-2.5 bg-white rounded-xl border border-line/80 px-3 py-2 shadow-xs">
-              <div class="flex items-center gap-2 flex-1 min-w-0">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2F9E5B" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0"><path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
-                <input id="locationInput" class="flex-1 min-w-0 text-[13.5px] font-semibold text-ink bg-transparent outline-none placeholder:text-ink-soft/60 truncate" placeholder="Enter location…">
+            <!-- Location & Alerts Bar -->
+            <div class="p-3.5 bg-cream/40 rounded-xl border border-line/60 flex flex-col gap-3 mb-4">
+              <div class="flex items-center justify-between gap-2.5 bg-white rounded-lg border border-line/80 px-3 py-2 shadow-xs focus-within:ring-2 focus-within:ring-forest/20">
+                <div class="flex items-center gap-2 flex-1 min-w-0">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2F9E5B" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0"><path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+                  <input id="locationInput" class="flex-1 min-w-0 text-[13px] font-semibold text-ink bg-transparent outline-none placeholder:text-ink-soft/60 truncate" placeholder="Enter location…">
+                </div>
+                <button id="btnAutoDetectLocation" type="button" class="flex-shrink-0 text-[11px] font-semibold text-forest border border-forest/30 bg-mint hover:bg-mint/80 px-3 py-1 rounded-lg transition-all shadow-xs flex items-center gap-1.5 whitespace-nowrap">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2v4"/><path d="M12 18v4"/><path d="M4 12H2"/><path d="M22 12h-2"/></svg>
+                  Detect
+                </button>
               </div>
-              <button id="btnAutoDetectLocation" type="button" class="flex-shrink-0 text-[11px] font-semibold text-forest border border-forest/30 bg-mint/40 hover:bg-mint/80 px-3 py-1 rounded-full transition-colors whitespace-nowrap">Detect</button>
+              <div class="flex items-center gap-5 flex-wrap px-0.5">
+                <label class="flex items-center gap-2 cursor-pointer select-none">
+                  <div class="switch" data-toggle="rainAlerts" role="switch" aria-checked="false" tabindex="0"></div>
+                  <span class="text-[12px] font-medium text-ink-soft whitespace-nowrap">Rain alerts</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer select-none">
+                  <div class="switch" data-toggle="windAlerts" role="switch" aria-checked="false" tabindex="0"></div>
+                  <span class="text-[12px] font-medium text-ink-soft whitespace-nowrap">Wind alerts</span>
+                </label>
+              </div>
             </div>
-<!-- (2026-07-13) Flex container with gap-5 flex-wrap and gap-2 for each alert toggle group; prev: tight spacing -->
-            <div class="flex items-center gap-5 flex-wrap px-1 pt-1">
-              <label class="flex items-center gap-2 cursor-pointer select-none mr-4">
-                <div class="switch" data-toggle="rainAlerts" role="switch" aria-checked="false" tabindex="0"></div>
-                <span class="text-[12px] font-medium text-ink-soft whitespace-nowrap">Rain alerts</span>
-              </label>
-              <label class="flex items-center gap-2 cursor-pointer select-none">
-                <div class="switch" data-toggle="windAlerts" role="switch" aria-checked="false" tabindex="0"></div>
-                <span class="text-[12px] font-medium text-ink-soft whitespace-nowrap">Wind alerts</span>
-              </label>
-            </div>
-          </div>
 
-          <!-- Hero Row: Left temp/details + Right Condition/Time -->
-          <div id="weatherCurrentContainer" class="p-5 flex items-center justify-between gap-4">
-            <!-- Left side: Big temp + Precip/Hum/Wind -->
-            <div class="flex items-center gap-4 min-w-0">
-              <span id="weatherMainIcon" class="text-[52px] leading-none flex-shrink-0">⛅</span>
-              <div class="min-w-0">
-                <div class="flex items-baseline gap-2 leading-none">
-                  <span id="weatherTempBig" class="text-[50px] font-light text-ink leading-none tracking-tight">32</span>
-                  <div class="flex items-center bg-[#F0F0F0] rounded-full p-0.5 mb-1 gap-0.5 flex-shrink-0 border border-line/40">
-                    <button id="btnUnitC" type="button" class="text-[10.5px] font-bold text-white bg-forest px-2.5 py-0.5 rounded-full transition-all">°C</button>
-                    <button id="btnUnitF" type="button" class="text-[10.5px] font-medium text-ink-soft px-2.5 py-0.5 rounded-full transition-all">°F</button>
+            <!-- Hero Row: Temperature & Live Weather Stats -->
+            <div id="weatherCurrentContainer" class="p-3.5 bg-cream/25 rounded-xl border border-line/50 flex flex-col gap-3 mb-4">
+              <div class="flex items-center justify-between gap-3">
+                <div class="flex items-center gap-3">
+                  <span id="weatherMainIcon" class="text-[38px] sm:text-[44px] leading-none flex-shrink-0">⛅</span>
+                  <div class="flex items-baseline gap-2">
+                    <span id="weatherTempBig" class="font-display text-[38px] sm:text-[44px] font-bold text-forest tracking-tight leading-none">32</span>
+                    <div class="flex items-center bg-white rounded-lg p-0.5 border border-line/60 flex-shrink-0">
+                      <button id="btnUnitC" type="button" class="text-[10.5px] font-bold text-white bg-forest px-2 py-0.5 rounded-md transition-all shadow-xs">°C</button>
+                      <button id="btnUnitF" type="button" class="text-[10.5px] font-medium text-ink-soft px-2 py-0.5 rounded-md transition-all">°F</button>
+                    </div>
                   </div>
                 </div>
-                <div class="text-[11.5px] text-ink-soft mt-2 leading-snug space-y-0.5 font-medium">
-                  <div>Precipitation: <span id="weatherPrecipVal" class="font-bold text-ink">10%</span></div>
-                  <div>Humidity: <span id="weatherHumVal" class="font-bold text-ink">62%</span></div>
-                  <div>Wind: <span id="weatherWindVal" class="font-bold text-ink">26 km/h</span></div>
+                <div class="text-right flex-shrink-0">
+                  <div id="weatherConditionText" class="text-[12px] font-bold text-forest bg-mint/70 border border-forest/20 px-2.5 py-1 rounded-lg inline-block">Cloudy</div>
+                  <div id="weatherDateSub" class="text-[11px] text-ink-soft mt-1 font-medium">Sunday 1:00 PM</div>
                 </div>
               </div>
+              <!-- Mini Metric Badges -->
+              <div class="flex items-center gap-2 flex-wrap text-[11.5px] font-medium text-ink-soft">
+                <span class="bg-white border border-line/60 px-2.5 py-1 rounded-lg flex items-center gap-1.5 shadow-2xs">🌧️ <span id="weatherPrecipVal" class="font-bold text-ink">10%</span></span>
+                <span class="bg-white border border-line/60 px-2.5 py-1 rounded-lg flex items-center gap-1.5 shadow-2xs">💧 <span id="weatherHumVal" class="font-bold text-ink">62%</span></span>
+                <span class="bg-white border border-line/60 px-2.5 py-1 rounded-lg flex items-center gap-1.5 shadow-2xs">💨 <span id="weatherWindVal" class="font-bold text-ink">26 km/h</span></span>
+              </div>
             </div>
-            <!-- Right side: Weather title + time + condition -->
-            <div class="text-right flex-shrink-0">
-              <div class="text-[16px] font-bold text-ink leading-tight">Weather</div>
-              <div id="weatherDateSub" class="text-[11.5px] text-ink-soft mt-1 font-medium">Sunday 1:00 PM</div>
-              <div id="weatherConditionText" class="text-[13px] font-bold text-forest mt-1">Cloudy</div>
+
+            <!-- Segmented Control Pill Tabs -->
+            <div class="mb-3">
+              <div class="flex items-center gap-1.5 p-1 bg-cream/50 rounded-xl border border-line/60">
+                <button id="tabWeatherTemp" type="button" class="flex-1 py-1.5 rounded-lg text-[12px] font-bold text-white bg-forest shadow-xs transition-all text-center">Temperature</button>
+                <button id="tabWeatherPrecip" type="button" class="flex-1 py-1.5 rounded-lg text-[12px] font-semibold text-ink-soft hover:text-ink transition-all text-center">Precipitation</button>
+                <button id="tabWeatherWind" type="button" class="flex-1 py-1.5 rounded-lg text-[12px] font-semibold text-ink-soft hover:text-ink transition-all text-center">Wind</button>
+              </div>
             </div>
-          </div>
 
-          <!-- Segmented Control Pill Tabs -->
-          <div class="flex items-center gap-2 px-5 py-2.5 bg-cream/40 border-y border-line/40 overflow-x-auto scrollbar-none">
-            <button id="tabWeatherTemp" type="button" class="px-3.5 py-1.5 rounded-lg text-[12.5px] font-bold text-forest bg-white shadow-xs border border-line/60 whitespace-nowrap transition-all flex-shrink-0">Temperature</button>
-            <button id="tabWeatherPrecip" type="button" class="px-3.5 py-1.5 rounded-lg text-[12.5px] font-semibold text-ink-soft hover:text-ink bg-transparent hover:bg-white/60 border border-transparent whitespace-nowrap transition-all flex-shrink-0">Precipitation</button>
-            <button id="tabWeatherWind" type="button" class="px-3.5 py-1.5 rounded-lg text-[12.5px] font-semibold text-ink-soft hover:text-ink bg-transparent hover:bg-white/60 border border-transparent whitespace-nowrap transition-all flex-shrink-0">Wind</button>
-          </div>
-
-          <!-- Hourly Graph -->
-          <div id="weatherHourlyChartContainer" class="w-full overflow-x-auto scrollbar-thin bg-white p-4">
-            <svg id="weatherHourlySvg" class="w-[600px] h-[90px]" viewBox="0 0 600 90" xmlns="http://www.w3.org/2000/svg"></svg>
+            <!-- Hourly Graph -->
+            <div id="weatherHourlyChartContainer" class="w-full overflow-x-auto scrollbar-none bg-white rounded-xl border border-line/60 p-3 mb-4">
+              <svg id="weatherHourlySvg" class="w-[600px] h-[85px]" viewBox="0 0 600 85" xmlns="http://www.w3.org/2000/svg"></svg>
+            </div>
           </div>
 
           <!-- 7-Day Forecast Cards Strip -->
-          <div id="weatherDailyStrip" class="flex items-center overflow-x-auto scrollbar-thin gap-2.5 p-4 bg-[#F8FAF8] border-t border-line/40"></div>
+          <div class="pt-3 border-t border-line/60">
+            <div id="weatherDailyStrip" class="flex items-center overflow-x-auto scrollbar-none gap-2.5 py-1"></div>
+          </div>
         </div>
       </div>
 
@@ -384,58 +569,18 @@
           <div class="bg-cream rounded-lg px-3 py-2.5 border border-line">Day 36 — Harvest window is open</div>
         </div>
       </div>
-
-      <!-- Custom Push Notifications (APK Only) -->
-      <div id="customNotificationsCard" class="bg-white rounded-2xl shadow-card border border-line p-5 mt-5">
-        <div class="flex items-center justify-between mb-3">
-          <h2 class="font-display font-semibold text-[16px] text-forest flex items-center gap-2" data-icon-label="bell">Custom Notifications</h2>
-          <span id="notificationStatus" class="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-cream text-ink-soft">Browser Only</span>
-        </div>
-        <p class="text-[12.5px] text-ink-soft mb-4">Create your own custom reminders for any time. In the APK, these become real push notifications that work even when the app is closed!</p>
-        
-        <!-- Custom Notification Form -->
-        <div id="customNotifForm" class="bg-cream rounded-xl p-4 mb-4">
-          <div class="grid gap-3">
-            <div>
-              <label class="text-[12px] font-semibold text-ink-soft mb-1.5 block">Notification Title</label>
-              <input id="customNotifTitle" type="text" placeholder="e.g., Check pH levels" class="w-full border border-line rounded-lg px-3 py-2 text-[13px] bg-white">
-            </div>
-            <div>
-              <label class="text-[12px] font-semibold text-ink-soft mb-1.5 block">Message</label>
-              <textarea id="customNotifMessage" rows="2" placeholder="e.g., Test and adjust water pH to 5.5-6.5" class="w-full border border-line rounded-lg px-3 py-2 text-[13px] bg-white resize-none"></textarea>
-            </div>
-            <div class="grid grid-cols-2 gap-3">
-              <div>
-                <label class="text-[12px] font-semibold text-ink-soft mb-1.5 block">Time</label>
-                <input id="customNotifTime" type="time" class="w-full border border-line rounded-lg px-3 py-2 text-[13px] bg-white">
-              </div>
-              <div>
-                <label class="text-[12px] font-semibold text-ink-soft mb-1.5 block">Repeat</label>
-                <select id="customNotifRepeat" class="w-full border border-line rounded-lg px-3 py-2 text-[13px] bg-white">
-                  <option value="once">Once</option>
-                  <option value="daily">Daily</option>
-                  <option value="weekly">Weekly</option>
-                </select>
-              </div>
-            </div>
-          </div>
-          <button id="btnAddCustomNotif" class="w-full mt-3 bg-forest text-white font-semibold text-[13px] py-2.5 rounded-lg flex items-center justify-center gap-1.5" data-icon="plus">Add Custom Notification</button>
-        </div>
-
-        <!-- Custom Notifications List -->
-        <div id="customNotifList" class="flex flex-col gap-2"></div>
-        <div id="customNotifEmpty" class="text-center py-8 text-ink-soft text-[13px]">
-          <div class="text-3xl mb-2">🔔</div>
-          <p>No custom notifications yet</p>
-          <p class="text-[11.5px] mt-1">Create reminders for pH testing, nutrient changes, or anything else!</p>
-        </div>
-      </div>
     </section>
 
     <!-- ---------- EXPENSES ---------- -->
-    <section id="page-expenses" class="page hidden pb-32 mb-16">
-      <h1 class="font-display text-[24px] font-semibold text-forest mb-1">Expenses & ROI</h1>
-      <p class="text-ink-soft text-[13px] mb-6">Track spend, log harvests, and see your investment pay for itself.</p>
+    <section id="page-expenses" class="page hidden   mb-16">
+      <!-- (2026-07-13) Add export PDF report button to header; prev: text only -->
+      <div class="flex items-center justify-between mb-6 flex-wrap gap-2">
+        <div>
+          <h1 class="font-display text-[24px] font-semibold text-forest mb-0.5">Expenses & ROI</h1>
+          <p class="text-ink-soft text-[13px]">Track spend, log harvests, and see your investment pay for itself.</p>
+        </div>
+        <button id="btnExportFinancialPDF" class="text-[12.5px] font-semibold text-white bg-forest hover:bg-forest/90 px-3.5 py-2 rounded-xl flex items-center gap-1.5 transition-all shadow-xs" data-icon="download">Export PDF Report</button>
+      </div>
 
       <div class="grid md:grid-cols-3 gap-4 mb-6">
         <div class="bg-forest text-white rounded-2xl p-5"><div class="text-[12px] text-white/70 mb-1">Total Invested</div><div class="font-mono text-2xl font-semibold">₱<span id="expTotalSpent">0</span></div></div>
@@ -451,18 +596,36 @@
       <div class="grid md:grid-cols-2 gap-5">
         <div class="bg-white rounded-2xl shadow-card border border-line p-5">
           <div class="flex items-center justify-between mb-3"><h2 class="font-display font-semibold text-[16px] text-forest">Expense Log</h2><button id="btnAddExpense" class="text-[12.5px] font-semibold text-forest bg-mint px-3 py-1.5 rounded-lg flex items-center gap-1" data-icon="plus">Add</button></div>
-          <div id="expenseList" class="flex flex-col divide-y divide-line max-h-[360px] overflow-y-auto scrollbar-thin"></div>
+<!-- (2026-07-13) Add right padding pr-3.5 to separate scrollbar; prev: pr-0 -->
+          <div id="expenseList" class="flex flex-col divide-y divide-line max-h-[360px] overflow-y-auto scrollbar-thin pr-3.5"></div>
         </div>
         <div class="bg-white rounded-2xl shadow-card border border-line p-5">
           <div class="flex items-center justify-between mb-3"><h2 class="font-display font-semibold text-[16px] text-forest">Harvest Log</h2><button id="btnAddHarvest" class="text-[12.5px] font-semibold text-forest bg-mint px-3 py-1.5 rounded-lg flex items-center gap-1" data-icon="plus">Log</button></div>
-          <div id="harvestList" class="flex flex-col divide-y divide-line max-h-[360px] overflow-y-auto scrollbar-thin"></div>
+          <div id="harvestList" class="flex flex-col divide-y divide-line max-h-[360px] overflow-y-auto scrollbar-thin pr-3.5"></div>
           <div id="harvestEmptyState" class="hidden text-center py-8 text-ink-soft text-[13px]">No harvests logged yet — harvest a pocket from the Tower page, or log one manually.</div>
+        </div>
+      </div>
+
+      <!-- (2026-07-13) Add harvest photo input & harvest gallery; prev: text only -->
+      <div id="harvestGalleryCard" class="bg-white rounded-2xl shadow-card border border-line p-5 mt-5">
+        <div class="flex items-center justify-between mb-3">
+          <div>
+            <h2 class="font-display font-semibold text-[17px] text-forest">Harvest Gallery</h2>
+            <p class="text-[12px] text-ink-soft mt-0.5">Photos of your fresh harvests & total yield.</p>
+          </div>
+          <span id="harvestPhotoCount" class="text-[11px] font-mono text-ink-soft bg-cream px-2.5 py-1 rounded-full border border-line/60">0 photos</span>
+        </div>
+        <div id="harvestGalleryGrid" class="grid grid-cols-2 sm:grid-cols-4 gap-3"></div>
+        <div id="harvestGalleryEmpty" class="hidden text-center py-8 text-ink-soft text-[13px] bg-cream/30 rounded-2xl border border-dashed border-line">
+          <div class="text-2xl mb-1.5">🥬</div>
+          <p class="font-medium text-ink">No harvest photos yet</p>
+          <p class="text-[11.5px] text-ink-soft mt-0.5">Attach a photo when logging a harvest to populate your gallery!</p>
         </div>
       </div>
     </section>
 
     <!-- ---------- TOOLS ---------- -->
-    <section id="page-tools" class="page hidden pb-32 mb-16">
+    <section id="page-tools" class="page hidden   mb-16">
       <h1 class="font-display text-[24px] font-semibold text-forest mb-1">Grower Tools</h1>
       <p class="text-ink-soft text-[13px] mb-6">Utilities for nutrient mixing and quick troubleshooting.</p>
 
@@ -528,6 +691,23 @@
             <p class="text-ink-soft text-[11.5px] mt-1">Tiny yellow spots or curled leaves. Spray with mild neem oil or dilute soap solution early morning.</p>
           </div>
         </div>
+        <!-- (2026-07-13) Responsive upload UI for leaf diagnostic; prev: squished -->
+        <div class="mt-4 pt-3 border-t border-line/60 flex flex-col gap-2.5">
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-[12.5px] font-semibold text-forest leading-tight flex items-center gap-1.5">
+              <span>📷</span>
+              <span>Attach Photo for Leaf Diagnostic</span>
+            </span>
+            <label for="pestPhotoInput" class="inline-flex items-center justify-center text-[11.5px] font-semibold text-forest bg-mint/90 hover:bg-mint active:scale-95 border border-forest/30 px-3 py-1.5 rounded-full cursor-pointer transition-all shadow-xs flex-shrink-0">
+              <span>Upload Photo</span>
+              <input id="pestPhotoInput" type="file" accept="image/*" class="hidden">
+            </label>
+          </div>
+          <div id="pestPhotoPreview" class="hidden rounded-xl border border-line overflow-hidden max-h-[160px] bg-cream/40 p-2 flex items-center justify-center relative">
+            <img id="pestPhotoImg" class="max-h-[140px] rounded-lg object-contain" src="" alt="Leaf Diagnostic Photo">
+            <button id="btnRemovePestPhoto" type="button" class="absolute top-3 right-3 w-6 h-6 bg-black/60 hover:bg-black/80 text-white rounded-full flex items-center justify-center text-[11px]">✕</button>
+          </div>
+        </div>
       </div>
 
       <div class="grid md:grid-cols-2 gap-5">
@@ -547,10 +727,10 @@
         </div>
       </div>
 
-<!-- (2026-07-13) Add Google Auth profile & login card in Tools; prev: text only -->
+<!-- (2026-07-13) Remove Firebase word from backup card; prev: Firebase -->
       <div class="bg-white rounded-2xl shadow-card border border-line p-5 mt-5">
         <h2 class="font-display font-semibold text-[16px] text-forest mb-2 flex items-center gap-2" data-icon-label="database">Data Backup & Sync</h2>
-        <p class="text-[12.5px] text-ink-soft mb-4">Your data saves locally and syncs automatically to Firebase. Cloud sync is <span id="cloudStatusText" class="font-semibold text-forest">active</span>.</p>
+        <p class="text-[12.5px] text-ink-soft mb-4">Your data saves locally and syncs automatically to the cloud. Cloud sync is <span id="cloudStatusText" class="font-semibold text-forest">active</span>.</p>
         
         <div id="googleAuthSection" class="mb-4 p-4 rounded-xl bg-cream/40 border border-line/60 flex items-center justify-between flex-wrap gap-3">
           <div class="flex items-center gap-3">
@@ -570,15 +750,14 @@
         <div class="flex flex-wrap gap-2.5">
           <button id="btnExportData" class="text-[12.5px] font-semibold text-forest bg-mint px-3.5 py-2 rounded-lg flex items-center gap-1.5" data-icon="download">Export Backup (JSON)</button>
           <label class="text-[12.5px] font-semibold text-forest bg-mint px-3.5 py-2 rounded-lg flex items-center gap-1.5 cursor-pointer" data-icon="upload">Import Backup<input id="btnImportData" type="file" accept="application/json" class="hidden"></label>
-          <button id="btnClearAllData" class="text-[12.5px] font-semibold text-clay bg-[#FCEBD8] px-3.5 py-2 rounded-lg flex items-center gap-1.5" data-icon="trash-2">Clear All Data</button>
         </div>
       </div>
     </section>
 
   </main>
 
-  <!-- ============ MOBILE BOTTOM TABS ============ -->
-  <nav class="md:hidden fixed bottom-0 inset-x-0 bg-white border-t border-line flex justify-around pt-1.5 pb-2 z-40" aria-label="Primary">
+  <!-- (2026-07-13) Add id bottomNav & overscroll protection; prev: nav without id -->
+  <nav id="bottomNav" class="md:hidden fixed bottom-0 inset-x-0 bg-white border-t border-line flex justify-around pt-1.5 pb-2 z-40" style="overscroll-behavior:none;" aria-label="Primary">
     <button class="tab-btn active flex flex-col items-center gap-0.5 px-2 py-1 text-[10px] text-ink-soft font-medium" data-page="dashboard"><span class="tab-dot w-1 h-1 rounded-full bg-gold absolute -mt-2"></span></button>
     <button class="tab-btn flex flex-col items-center gap-0.5 px-2 py-1 text-[10px] text-ink-soft font-medium" data-page="tower"><span class="tab-dot w-1 h-1 rounded-full bg-gold absolute -mt-2"></span></button>
     <button class="tab-btn flex flex-col items-center gap-0.5 px-2 py-1 text-[10px] text-ink-soft font-medium" data-page="nursery"><span class="tab-dot w-1 h-1 rounded-full bg-gold absolute -mt-2"></span></button>
@@ -668,14 +847,15 @@
         </div>
       </div>
       <div><label class="text-[12.5px] font-medium text-ink-soft">Start Date (sowing day)</label><input id="trayDate" type="date" class="w-full border border-line rounded-lg px-3 py-2 mt-1 text-[13.5px]"></div>
+      <!-- (2026-07-13) Add 1-10 grid limits to tray inputs; prev: max 20 -->
       <div>
         <label class="text-[12.5px] font-medium text-ink-soft">Tray Size (Grid Dimensions)</label>
         <div class="flex items-center gap-2 mt-1">
-          <input id="trayGridRows" type="number" min="1" max="50" value="5" placeholder="Rows" class="w-full border border-line rounded-lg px-3 py-2 text-[13.5px] font-mono">
+          <input id="trayGridRows" type="number" min="1" max="10" value="5" placeholder="Rows" class="w-full border border-line rounded-lg px-3 py-2 text-[13.5px] font-mono">
           <span class="text-ink-soft font-semibold">×</span>
-          <input id="trayGridCols" type="number" min="1" max="50" value="10" placeholder="Cols" class="w-full border border-line rounded-lg px-3 py-2 text-[13.5px] font-mono">
+          <input id="trayGridCols" type="number" min="1" max="10" value="10" placeholder="Cols" class="w-full border border-line rounded-lg px-3 py-2 text-[13.5px] font-mono">
         </div>
-        <div class="text-[11px] text-ink-soft mt-1">Total capacity: <span id="trayCalcCount" class="font-semibold text-forest font-mono">50</span> seedlings</div>
+        <div class="text-[11px] text-ink-soft mt-1">Total capacity: <span id="trayCalcCount" class="font-semibold text-forest font-mono">50</span> seedlings (max 10×10)</div>
       </div>
       <input id="trayCount" type="hidden" value="50">
       <button type="submit" class="mt-2 bg-forest text-white font-semibold text-[14px] py-2.5 rounded-lg">Start Tray</button>
@@ -699,17 +879,66 @@
         </div>
       </div>
       <div><label class="text-[12.5px] font-medium text-ink-soft">Start Date (sowing day)</label><input id="editTrayDate" type="date" class="w-full border border-line rounded-lg px-3 py-2 mt-1 text-[13.5px]"></div>
+      <!-- (2026-07-13) Add 1-10 grid limits to edit tray inputs; prev: max 20 -->
       <div>
         <label class="text-[12.5px] font-medium text-ink-soft">Tray Size (Grid Dimensions)</label>
         <div class="flex items-center gap-2 mt-1">
-          <input id="editTrayGridRows" type="number" min="1" max="50" placeholder="Rows" class="w-full border border-line rounded-lg px-3 py-2 text-[13.5px] font-mono">
+          <input id="editTrayGridRows" type="number" min="1" max="10" placeholder="Rows" class="w-full border border-line rounded-lg px-3 py-2 text-[13.5px] font-mono">
           <span class="text-ink-soft font-semibold">×</span>
-          <input id="editTrayGridCols" type="number" min="1" max="50" placeholder="Cols" class="w-full border border-line rounded-lg px-3 py-2 text-[13.5px] font-mono">
+          <input id="editTrayGridCols" type="number" min="1" max="10" placeholder="Cols" class="w-full border border-line rounded-lg px-3 py-2 text-[13.5px] font-mono">
         </div>
-        <div class="text-[11px] text-ink-soft mt-1">Total capacity: <span id="editTrayCalcCount" class="font-semibold text-forest font-mono">0</span> seedlings</div>
+        <div class="text-[11px] text-ink-soft mt-1">Total capacity: <span id="editTrayCalcCount" class="font-semibold text-forest font-mono">0</span> seedlings (max 10×10)</div>
       </div>
       <button type="submit" class="mt-2 bg-forest text-white font-semibold text-[14px] py-2.5 rounded-lg">Save Changes</button>
     </form>
+  </div>
+</div>
+
+<!-- (2026-07-13) Modal for adding custom reminder; prev: browser prompt() -->
+<div id="addReminderModal" role="dialog" aria-modal="true" class="hidden fixed inset-0 z-[75] modal-backdrop flex items-end md:items-center justify-center p-0 md:p-4">
+  <div class="modal-panel bg-white w-full md:max-w-sm rounded-t-3xl md:rounded-3xl p-5 md:p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="font-display font-semibold text-[18px] text-forest">Add Custom Reminder</h3>
+      <button id="addReminderModalClose" class="w-8 h-8 rounded-full bg-cream flex items-center justify-center" data-icon="x"></button>
+    </div>
+    <div class="flex flex-col gap-3">
+      <div>
+        <label class="text-[12px] font-semibold text-ink-soft mb-1.5 block">Reminder Title</label>
+        <input id="addReminderTitle" type="text" placeholder="e.g. Check Nutrient Level" class="w-full border border-line rounded-xl px-3 py-2.5 text-[13.5px] bg-white focus:outline-none focus:border-forest transition-colors">
+      </div>
+      <div>
+        <label class="text-[12px] font-semibold text-ink-soft mb-1.5 block">Time</label>
+        <input id="addReminderTime" type="time" value="09:00" class="w-full border border-line rounded-xl px-3 py-2.5 text-[13.5px] bg-white focus:outline-none focus:border-forest transition-colors">
+      </div>
+      <button id="btnConfirmAddReminder" class="w-full bg-forest text-white font-semibold text-[14px] py-2.5 rounded-xl mt-1">Save Reminder</button>
+    </div>
+  </div>
+</div>
+
+<!-- (2026-07-13) Add seedling cell modal for health editing; prev: none -->
+<div id="trayCellModal" role="dialog" aria-modal="true" class="hidden fixed inset-0 z-[65] modal-backdrop flex items-end md:items-center justify-center p-0 md:p-4">
+  <div class="modal-panel bg-white w-full md:max-w-sm rounded-t-3xl md:rounded-3xl p-5 md:p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="font-display font-semibold text-[18px] text-forest" id="trayCellModalTitle">Edit Seedling Cell</h3>
+      <button id="trayCellModalClose" class="w-8 h-8 rounded-full bg-cream flex items-center justify-center" data-icon="x"></button>
+    </div>
+    <div id="trayCellModalBody"></div>
+  </div>
+</div>
+
+<!-- (2026-07-13) Modal to select target tray for reversion; prev: auto tray -->
+<div id="returnTrayModal" role="dialog" aria-modal="true" class="hidden fixed inset-0 z-[65] modal-backdrop flex items-end md:items-center justify-center p-0 md:p-4">
+  <div class="modal-panel bg-white w-full md:max-w-sm rounded-t-3xl md:rounded-3xl p-5 md:p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="font-display font-semibold text-[18px] text-forest" id="returnTrayModalTitle">Return to Tray</h3>
+      <button id="returnTrayModalClose" class="w-8 h-8 rounded-full bg-cream flex items-center justify-center" data-icon="x"></button>
+    </div>
+    <div class="flex flex-col gap-3">
+      <label class="text-[12.5px] font-medium text-ink-soft">Select Target Nursery Tray</label>
+      <select id="returnTargetTraySelect" class="w-full border border-line rounded-lg px-3 py-2 text-[13.5px] bg-white"></select>
+      <div id="returnTrayCellGrid" class="my-1 border border-line rounded-xl p-2 bg-[#FAFCFA]"></div>
+      <button id="btnConfirmReturnToTray" class="w-full bg-forest text-white font-semibold text-[14px] py-2.5 rounded-lg mt-2 flex items-center justify-center gap-1.5" data-icon="move-left">Confirm Return to Tray</button>
+    </div>
   </div>
 </div>
 
@@ -779,6 +1008,17 @@
       <div><label class="text-[12.5px] font-medium text-ink-soft">Grams Harvested</label><input id="harvestGrams" required type="number" min="0" step="1" placeholder="0" class="w-full border border-line rounded-lg px-3 py-2.5 mt-1 text-[14px] font-mono"></div>
       <!-- (2026-07-13) Add market rate per kg for financial savings calculation; prev: hardcoded 500/kg -->
       <div><label class="text-[12.5px] font-medium text-ink-soft">Market Rate (₱ / kg)</label><input id="harvestMarketRate" type="number" min="0" step="10" value="500" class="w-full border border-line rounded-lg px-3 py-2.5 mt-1 text-[14px] font-mono"></div>
+      <div class="bg-cream/40 p-3 rounded-xl border border-line/60">
+        <label class="text-[12px] font-semibold text-ink-soft flex items-center justify-between cursor-pointer">
+          <span>📷 Harvest Photo</span>
+          <span class="text-[11.5px] font-semibold text-forest underline">Attach Photo</span>
+          <input id="harvestPhotoInput" type="file" accept="image/*" class="hidden">
+        </label>
+        <div id="harvestPhotoPreview" class="hidden relative mt-2 max-h-[100px] rounded-lg overflow-hidden border border-line bg-black/5 flex items-center justify-center">
+          <img id="harvestPhotoImg" src="" class="max-h-[100px] object-contain rounded-lg" alt="Harvest Photo">
+          <button id="btnRemoveHarvestPhoto" type="button" class="absolute top-1.5 right-1.5 w-6 h-6 bg-black/60 text-white rounded-full flex items-center justify-center text-[10px]">✕</button>
+        </div>
+      </div>
       <button type="submit" class="mt-2 bg-forest text-white font-semibold text-[14px] py-2.5 rounded-lg">Save Harvest</button>
     </form>
   </div>
@@ -789,7 +1029,8 @@
   <div class="w-px h-5 bg-white/20 flex-shrink-0"></div>
   <button id="btnSelectionAll" class="text-[12px] font-semibold text-white/85 px-2 py-1.5 whitespace-nowrap flex-shrink-0">Select All</button>
   <button id="btnSelectionAssign" class="text-[12.5px] font-semibold bg-white text-forest px-3 py-1.5 rounded-lg flex items-center gap-1.5 whitespace-nowrap flex-shrink-0" data-icon="layers">Assign</button>
-  <button id="btnSelectionClear" class="text-[12.5px] font-semibold bg-white/15 w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" data-icon="trash-2" aria-label="Clear selected"></button>
+  <!-- (2026-07-13) Update selection action bar delete tooltip; prev: clear -->
+  <button id="btnSelectionClear" class="text-[12.5px] font-semibold bg-white/15 w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" data-icon="trash-2" aria-label="Delete selected rows" title="Delete selected row(s)"></button>
   <button id="btnSelectionCancel" class="text-white/70 p-1.5 flex-shrink-0" data-icon="x"></button>
 </div>
 
@@ -814,6 +1055,15 @@
 
 <div id="a11yLiveRegion" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
 <div id="toastContainer" class="fixed bottom-20 md:bottom-6 right-4 left-4 md:left-auto z-[75] flex flex-col gap-2 items-end pointer-events-none"></div>
+
+<!-- (2026-07-13) Add logout confirmation modal with spinner; prev: none -->
+<div id="logoutModal" role="dialog" aria-modal="true" class="hidden fixed inset-0 z-[70] modal-backdrop flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+  <div class="modal-panel bg-white w-full max-w-xs rounded-2xl p-6 text-center flex flex-col items-center gap-3 shadow-xl">
+    <div class="w-8 h-8 border-3 border-forest/30 border-t-forest rounded-full animate-spin"></div>
+    <h4 class="font-display font-semibold text-[16px] text-forest">Logging out…</h4>
+    <p class="text-[12.5px] text-ink-soft">Please wait a moment while we clear your session.</p>
+  </div>
+</div>
 
 <!-- ============ CONFIRMATION MODAL ============ -->
 <div id="confirmModal" role="dialog" aria-modal="true" class="hidden fixed inset-0 z-[70] modal-backdrop flex items-center justify-center p-4">
@@ -869,8 +1119,9 @@
   document.getElementById('harvestModalClose').innerHTML = icon('x','w-4 h-4',16);
 })();
 </script>
-<script src="js/cloud.js"></script>
+<!-- (2026-07-13) Load app.js before cloud.js; prev: cloud.js loaded first -->
 <script src="js/app.js"></script>
+<script src="js/cloud.js"></script>
 <script>
   if('serviceWorker' in navigator && (location.protocol==='http:'||location.protocol==='https:')){
     window.addEventListener('load', ()=>{

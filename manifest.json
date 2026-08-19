@@ -1,7 +1,7 @@
 {
-  "name": "HydroTrack — TowerCrop",
-  "short_name": "HydroTrack",
-  "description": "Hydroponic tower manager: growth tracking, reminders, expenses & ROI.",
+  "name": "HydroGreen - Track Hydroponic Tower and Trays",
+  "short_name": "HydroGreen",
+  "description": "Track hydroponic towers, seedling nursery trays, light schedules, expenses and crop harvests with HydroGreen.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

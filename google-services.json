@@ -14,6 +14,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "222210946101-hgjcmfvs85nf2pnuadciflbbmd035rfs.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.hydrotrack.app",
+            "certificate_hash": "ed3613b1ca6dde62455885d2c5615059d720632d"
+          }
+        },
+        {
           "client_id": "222210946101-t9sm5vaf2239gr6f76n6im8m6cn80rkl.apps.googleusercontent.com",
           "client_type": 3
         }
@@ -33,6 +41,21 @@
           ]
         }
       }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:222210946101:android:23f3d522943dd5fb36ad7f",
+        "android_client_info": {
+          "package_name": "com.hydrotrack.manager"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB53U2nn3yihtjj73KgXS4LZ1CkLDiYZas"
+        }
+      ],
+      "services": {}
     }
   ],
   "configuration_version": "1"

@@ -1,5 +1,5 @@
 ---
-trigger: always_on
+trigger: manual
 ---
 
 # SYSTEM SKILL: PRINCIPAL CAPACITOR & WEB HYBRID ARCHITECT

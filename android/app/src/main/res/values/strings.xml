@@ -1,7 +1,10 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">HydroTrack</string>
-    <string name="title_activity_main">HydroTrack</string>
+    <!-- (2026-07-13) Set app_name to HydroGreen; prev: HydroTrack -->
+    <string name="app_name">HydroGreen</string>
+    <string name="title_activity_main">HydroGreen</string>
     <string name="package_name">com.hydrotrack.app</string>
     <string name="custom_url_scheme">com.hydrotrack.app</string>
+    <!-- (2026-07-13) Add default_web_client_id for Google One-Tap; prev: none -->
+    <string name="default_web_client_id">222210946101-t9sm5vaf2239gr6f76n6im8m6cn80rkl.apps.googleusercontent.com</string>
 </resources>

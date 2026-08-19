@@ -60,10 +60,15 @@ const DEFAULT_EXPENSES = [
   { id:'e9', name:'SNAP Nutrient Solution A & B', amount:420, category:'Consumables' }
 ];
 
+// (2026-07-13) Add customReminders to DEFAULT_SETTINGS; prev: missing field
 const DEFAULT_SETTINGS = {
   sunReminder:false, heatReminder:false, nightReminder:false,
   sunTime:'07:00', heatTime:'11:00', nightTime:'18:00',
-  rainAlerts:false, windAlerts:false, browserNotifs:false, location:'Bogo City'
+  rainAlerts:false, windAlerts:false, browserNotifs:false, location:'Bogo City',
+  customReminders: [
+    { id: 'cr_1', title: 'Check Reservoir pH & EC', time: '08:30', active: true },
+    { id: 'cr_2', title: 'Refill Water Tank', time: '17:00', active: true }
+  ]
 };
 
 /* ---------------- storage module ---------------- */
@@ -115,15 +120,8 @@ const store = {
       this.set(KEYS.trays, []);
     }
     
-    // Keep real expenses as initial equipment cost
-    if(!localStorage.getItem(KEYS.expenses)) {
-      const initialDate = todayISO();
-      const realExpenses = DEFAULT_EXPENSES.map(exp => ({
-        ...exp,
-        date: initialDate
-      }));
-      this.set(KEYS.expenses, realExpenses);
-    }
+    // (2026-07-13) Default expenses to empty array; prev: seeded 4320 default costs
+    if(!localStorage.getItem(KEYS.expenses)) this.set(KEYS.expenses, []);
     
     if(!localStorage.getItem(KEYS.harvests)) this.set(KEYS.harvests, []);
     if(!localStorage.getItem(KEYS.settings)) this.set(KEYS.settings, DEFAULT_SETTINGS);
@@ -137,14 +135,42 @@ const store = {
 
 /* ---------------- helpers ---------------- */
 function uid(){ return Math.random().toString(36).slice(2,10); }
-function todayISO(){ const d=new Date(); d.setHours(0,0,0,0); return d.toISOString().slice(0,10); }
-function daysAgoISO(n){ const d=new Date(); d.setDate(d.getDate()-n); d.setHours(0,0,0,0); return d.toISOString().slice(0,10); }
-function addDays(iso,n){ const d=new Date(iso+'T00:00:00'); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); }
-function dayOfCycle(dateISO){ const start=new Date(dateISO+'T00:00:00'); const now=new Date(); now.setHours(0,0,0,0); return Math.floor((now-start)/86400000)+1; }
+// (2026-07-13) Fix timezone & day-offset in plant age math; prev: 2-day skew
+function toLocalISO(d){
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function todayISO(){ return toLocalISO(new Date()); }
+function daysAgoISO(n){
+  const d = new Date();
+  const offset = Math.max(0, n > 0 ? (n - 1) : 0);
+  d.setDate(d.getDate() - offset);
+  return toLocalISO(d);
+}
+function addDays(iso,n){
+  const parts = (iso||'').split('-').map(Number);
+  const d = (parts.length===3) ? new Date(parts[0], parts[1]-1, parts[2]) : new Date();
+  d.setDate(d.getDate()+n);
+  return toLocalISO(d);
+}
+function dayOfCycle(dateISO){
+  if(!dateISO) return 1;
+  const parts = dateISO.split('-').map(Number);
+  if(parts.length!==3) return 1;
+  const start = new Date(parts[0], parts[1]-1, parts[2]);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const diffDays = Math.round((today - start) / 86400000);
+  return Math.max(1, diffDays + 1);
+}
 function stageForDay(day){ for(const s of STAGES){ if(day>=s.range[0] && day<=s.range[1]) return s; } return day<1?STAGES[0]:STAGES[STAGES.length-1]; }
 function stageIndex(key){ return STAGES.findIndex(s=>s.key===key); }
 function fmtPeso(n){ return Math.round(n).toLocaleString('en-PH'); }
-function fmtDate(iso){ if(!iso) return '—'; return new Date(iso+'T00:00:00').toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'}); }
+function fmtDate(iso){
+  if(!iso) return '—';
+  const parts = iso.split('-').map(Number);
+  if(parts.length===3) return new Date(parts[0], parts[1]-1, parts[2]).toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'});
+  return iso;
+}
 
 /* ---- Image compression for Firebase (fixes "invalid nested entity" error) ---- */
 function compressImage(file, maxWidth = 1200, quality = 0.8) {
@@ -224,9 +250,11 @@ function nextTransitionInfo(day, stageKeyOrObj){
 
 /* ================= INIT ================= */
 store.init();
-let state = {
+// (2026-07-13) Bind state globally on window; prev: block-scoped let state
+window.state = state = {
   towers: store.get(KEYS.towers, [{ id:'t1', name:'Main Tower' }]),
-  activeTowerId: localStorage.getItem(KEYS.activeTower) || 't1',
+  // (2026-07-13) Restore activeTowerId from storage; prev: default to t1
+  activeTowerId: store.get(KEYS.activeTower, 't1'),
   rows: store.get(KEYS.rows, []),
   pockets: store.get(KEYS.pockets, []),
   trays: store.get(KEYS.trays, []),
@@ -242,6 +270,48 @@ let state = {
 };
 // Ensure all rows have a towerId assigned
 state.rows.forEach(r => { if(!r.towerId) r.towerId = 't1'; });
+// (2026-07-13) Preserve active tower from storage; prev: reset to t1
+const savedTowerId = store.get(KEYS.activeTower);
+if(savedTowerId && state.towers.some(t => t.id === savedTowerId)){ state.activeTowerId = savedTowerId; }
+else { state.activeTowerId = (state.towers.find(t=>t.id==='t1') || state.towers[0])?.id || 't1'; }
+localStorage.setItem(KEYS.activeTower, state.activeTowerId);
+
+// (2026-07-13) Clean account reset helper; prev: retained previous user state
+function buildCleanDefaultState(){
+  const rows = Array.from({length:8}, (_,i)=>({ id:'r'+(i+1), towerId:'t1', potCount:3 }));
+  const pockets = [];
+  let n=1;
+  rows.forEach(row=>{ for(let i=0;i<3;i++) pockets.push({ id:String(n++), rowId:row.id, variety:null, datePlanted:null, override:null }); });
+  return {
+    towers: [{ id:'t1', name:'Main Tower' }],
+    activeTowerId: 't1',
+    rows: rows,
+    pockets: pockets,
+    trays: [],
+    expenses: [],
+    harvests: [],
+    settings: JSON.parse(JSON.stringify(DEFAULT_SETTINGS)),
+    completed: {},
+    alertLog: [],
+    meta: { firstPlantPrompted:false },
+    photoLog: [],
+    reservoir: { ph:6.0, targetPh:6.0, ec:1.6, targetEc:1.8, tempC:22, waterPct:85, capacityLiters:30, history:[] }
+  };
+}
+window.buildCleanDefaultState = buildCleanDefaultState;
+
+function resetStateToDefaults(){
+  const clean = buildCleanDefaultState();
+  Object.keys(clean).forEach(k => {
+    state[k] = clean[k];
+    if(KEYS[k]) store.set(KEYS[k], clean[k]);
+  });
+  localStorage.setItem(KEYS.activeTower, 't1');
+  if(typeof renderPage === 'function') renderPage(typeof currentPageName === 'function' ? currentPageName() : 'dashboard');
+  if(typeof renderReminders === 'function') renderReminders();
+  if(typeof renderCustomReminders === 'function') renderCustomReminders();
+}
+window.resetStateToDefaults = resetStateToDefaults;
 
 function getActiveTower(){
   let t = state.towers.find(x=>x.id===state.activeTowerId);
@@ -258,23 +328,27 @@ function getActiveTower(){
   }
   return t;
 }
+// (2026-07-13) Re-schedule push notifications when settings persist; prev: none
 function persist(part){
   if(state[part]===undefined) return;
   store.set(KEYS[part], state[part]);
   if(typeof cloudSync!=='undefined' && cloudSync.connected && !cloudSync.applyingRemote) cloudSync.pushDebounced();
+  if(part === 'settings' && typeof notificationManager !== 'undefined' && notificationManager.scheduleAllReminders){
+    notificationManager.scheduleAllReminders();
+  }
 }
-// (2026-07-13) White bg undo snackbar with text line break; prev: dark bg
+// (2026-07-13) Auto-dismiss undo snackbar cleanly; prev: stayed stuck in DOM
 let activeUndoTimer = null;
 let activeUndoInterval = null;
 function triggerUndoSnackbar(message, restoreFn){
   if(activeUndoTimer){ clearTimeout(activeUndoTimer); activeUndoTimer = null; }
   if(activeUndoInterval){ clearInterval(activeUndoInterval); activeUndoInterval = null; }
-  const existing = document.getElementById('undoSnackbar');
-  if(existing) existing.remove();
+  document.querySelectorAll('#undoSnackbar').forEach(s => s.remove());
 
   const snackbar = document.createElement('div');
   snackbar.id = 'undoSnackbar';
-  snackbar.style.cssText = 'position:fixed; bottom:max(5.5rem, calc(4.5rem + env(safe-area-inset-bottom))); left:50%; transform:translateX(-50%); z-index:99999; background-color:#FFFFFF !important; color:#0F172A !important; padding:10px 14px; border-radius:16px; box-shadow:0 10px 25px rgba(0,0,0,0.18); display:flex; align-items:center; justify-content:space-between; gap:12px; font-size:12px; font-weight:600; border:1.5px solid #CBD5E1; max-width:88vw; min-width:280px;';
+  // (2026-07-13) Set snackbar z-index under modals; prev: z-index:99999
+  snackbar.style.cssText = 'position:fixed; bottom:max(5.5rem, calc(4.5rem + env(safe-area-inset-bottom))); left:50%; transform:translateX(-50%); z-index:15000; background-color:#FFFFFF !important; color:#0F172A !important; padding:10px 14px; border-radius:16px; box-shadow:0 10px 25px rgba(0,0,0,0.18); display:flex; align-items:center; justify-content:space-between; gap:12px; font-size:12px; font-weight:600; border:1.5px solid #CBD5E1; max-width:88vw; min-width:280px;';
   
   let seconds = 5;
   snackbar.innerHTML = `
@@ -290,10 +364,14 @@ function triggerUndoSnackbar(message, restoreFn){
   const countdownEl = snackbar.querySelector('#undoCountdown');
   const btnUndo = snackbar.querySelector('#btnUndoAction');
 
-  btnUndo.addEventListener('click', ()=>{
+  function removeSnackbar(){
     if(activeUndoTimer){ clearTimeout(activeUndoTimer); activeUndoTimer = null; }
     if(activeUndoInterval){ clearInterval(activeUndoInterval); activeUndoInterval = null; }
     snackbar.remove();
+  }
+
+  btnUndo.addEventListener('click', ()=>{
+    removeSnackbar();
     restoreFn();
     showToast('Action undone', 'forest', 'check');
   });
@@ -302,17 +380,13 @@ function triggerUndoSnackbar(message, restoreFn){
     seconds--;
     if(countdownEl) countdownEl.textContent = `${seconds}s`;
     if(seconds <= 0){
-      clearInterval(activeUndoInterval);
-      activeUndoInterval = null;
-      if(snackbar.parentElement) snackbar.remove();
+      removeSnackbar();
     }
   }, 1000);
 
   activeUndoTimer = setTimeout(()=>{
-    if(activeUndoInterval){ clearInterval(activeUndoInterval); activeUndoInterval = null; }
-    if(snackbar.parentElement) snackbar.remove();
-    activeUndoTimer = null;
-  }, 5200);
+    removeSnackbar();
+  }, 5000);
 }
 function hasAnyPlant(){ return state.pockets.some(p=>p.variety) || state.trays.length>0; }
 
@@ -356,8 +430,9 @@ function showPage(name, opts){
   }
 }
 
-// (2026-07-13) Save active page in localStorage for page reload; prev: default dashboard
+// (2026-07-13) Dismiss undo snackbar on tab navigation; prev: remained on screen
 function performPageSwitch(name, pageEl, opts){
+  document.querySelectorAll('#undoSnackbar').forEach(s=>s.remove());
   try { localStorage.setItem('ht_active_page', name); } catch(e){}
   document.querySelectorAll('.page').forEach(p=>{ if(p!==pageEl) p.classList.add('hidden'); });
   pageEl.classList.remove('hidden');
@@ -475,11 +550,24 @@ function towerNameForRow(row){
 function locationLabel(row){
   return state.towers.length>1 ? `${towerNameForRow(row)} · ${rowLabel(row)}` : rowLabel(row);
 }
+// (2026-07-13) Include active custom reminders in Today tasks; prev: none
 function computeTasks(){
   const tasks = [];
   if(state.settings.sunReminder) tasks.push({ id:'sun-morning', time:formatTimeLabel(state.settings.sunTime), text:'Put seedling trays in direct morning sun', iconName:'sun' });
   if(state.settings.heatReminder) tasks.push({ id:'heat-midday', time:formatTimeLabel(state.settings.heatTime), text:'Move trays to shade — scorching midday heat', iconName:'thermometer' });
   if(state.settings.nightReminder) tasks.push({ id:'dark-night', time:formatTimeLabel(state.settings.nightTime), text:'Turn off porch lights — plants need full darkness', iconName:'moon' in ICONS ? 'moon':'bell' });
+
+  const customReminders = (state.settings && Array.isArray(state.settings.customReminders)) ? state.settings.customReminders : (typeof getCustomReminders === 'function' ? getCustomReminders() : []);
+  customReminders.forEach(r=>{
+    if(r.active){
+      tasks.push({
+        id: 'cust-' + r.id,
+        time: formatTimeLabel(r.time),
+        text: r.title,
+        iconName: 'bell'
+      });
+    }
+  });
 
   state.trays.forEach(t=>{
     const day = dayOfCycle(t.startDate);
@@ -516,7 +604,9 @@ function upcomingTransitions(limit){
 }
 
 /* ================= DASHBOARD ================= */
+// (2026-07-13) Dismiss skeleton overlay on dashboard render; prev: stuck visible
 function renderDashboard(){
+  document.getElementById('dashboardSkeletonOverlay')?.classList.add('hidden');
   document.getElementById('dateToday').textContent = new Date().toLocaleDateString('en-PH',{weekday:'long', month:'long', day:'numeric', year:'numeric'});
 
   const activePlants = state.pockets.filter(p=>p.variety).length;
@@ -849,7 +939,8 @@ function buildHorizontalTowerSVG(filterVariety, targetRows){
 
 /* ---- Multi-select via tap / long-press + drag (mouse & touch, via Pointer Events) ---- */
 const selectionState = { active:false, ids:new Set() };
-let lp = { timer:null, dragging:false, fired:false, startX:0, startY:0, activeId:null };
+// (2026-07-13) Add mode to lp state for tower pocket drag select/unselect; prev: select only
+let lp = { timer:null, dragging:false, fired:false, startX:0, startY:0, activeId:null, mode:'select' };
 const LONG_PRESS_MS = 380, MOVE_CANCEL_PX = 12;
 
 // (2026-07-13) Consolidate tap modal opening to click event; prev: duplicate pointerup
@@ -866,27 +957,36 @@ function initTowerInteraction(){
     if(selectionState.active) toggleSelect(id, !selectionState.ids.has(id));
     else openPocketModal(id);
   });
+  // (2026-07-13) Determine drag mode select/unselect based on initial pocket state; prev: select only
   el.addEventListener('pointerdown', (e)=>{
     const pocketEl = e.target.closest('[data-pocket-id]');
     if(!pocketEl) return;
     lp.activeId = Number(pocketEl.dataset.pocketId);
+    const isAlreadySel = selectionState.ids.has(lp.activeId);
+    lp.mode = isAlreadySel ? 'unselect' : 'select';
     lp.startX=e.clientX; lp.startY=e.clientY; lp.fired=false; lp.dragging=false;
     lp.timer = setTimeout(()=>{
       lp.fired = true; lp.dragging = true;
       selectionState.active = true;
-      toggleSelect(lp.activeId, true);
+      toggleSelect(lp.activeId, lp.mode === 'select');
       try{ el.setPointerCapture(e.pointerId); }catch(err){}
       if(navigator.vibrate) navigator.vibrate(12);
     }, LONG_PRESS_MS);
   });
+  // (2026-07-13) Prevent touch scroll on drag select; prev: allow touch pan
+  el.addEventListener('touchmove', (e)=>{
+    if(lp.dragging || lp.fired){ if(e.cancelable) e.preventDefault(); }
+  }, { passive: false });
+  // (2026-07-13) Apply lp.mode select or unselect during tower drag; prev: select only
   el.addEventListener('pointermove', (e)=>{
     if(lp.timer && !lp.fired){
       if(Math.hypot(e.clientX-lp.startX, e.clientY-lp.startY) > MOVE_CANCEL_PX){ clearTimeout(lp.timer); lp.timer=null; }
     }
     if(lp.dragging){
+      if(e.cancelable) e.preventDefault();
       const under = document.elementFromPoint(e.clientX, e.clientY);
       const pocketEl = under && under.closest && under.closest('[data-pocket-id]');
-      if(pocketEl) toggleSelect(Number(pocketEl.dataset.pocketId), true);
+      if(pocketEl) toggleSelect(Number(pocketEl.dataset.pocketId), lp.mode === 'select');
     }
   });
   el.addEventListener('pointerup', (e)=>{
@@ -924,14 +1024,17 @@ function exitSelectionMode(){
   updateSelectionVisuals(); renderSelectionBar();
   document.getElementById('btnToggleSelectMode')?.classList.remove('!bg-forest','!text-white');
 }
-// (2026-07-13) Set data-selected attribute in updateSelectionVisuals; prev: none
+// (2026-07-13) Hide ring style.display when unselected; prev: opacity only
 function updateSelectionVisuals(){
   document.querySelectorAll('#towerDiagram [data-pocket-id]').forEach(g=>{
     const id = Number(g.dataset.pocketId);
     const isSel = selectionState.ids.has(id);
     g.setAttribute('data-selected', isSel ? 'true' : 'false');
     const ring = g.querySelector('.pocket-select-ring');
-    if(ring) ring.setAttribute('opacity', isSel ? '1' : '0');
+    if(ring){
+      ring.setAttribute('opacity', isSel ? '1' : '0');
+      ring.style.display = isSel ? 'block' : 'none';
+    }
   });
   document.querySelectorAll('[data-pocket-chip]').forEach(chip=>{
     chip.classList.toggle('ring-2', selectionState.ids.has(Number(chip.dataset.pocketChip)));
@@ -1012,16 +1115,62 @@ document.getElementById('btnSelectionAll')?.addEventListener('click', ()=>{
   updateSelectionVisuals(); renderSelectionBar();
 });
 document.getElementById('btnSelectionAssign')?.addEventListener('click', ()=>openBulkAssignModal());
+// (2026-07-13) Clear plants in rows first before row deletion; prev: pocket level
 document.getElementById('btnSelectionClear')?.addEventListener('click', async ()=>{
-  if(!await showConfirm(`Clear ${selectionState.ids.size} selected pocket(s)?`, 'Clear Selection')) return;
-  const snapshotPockets = JSON.parse(JSON.stringify(state.pockets));
-  const count = selectionState.ids.size;
-  selectionState.ids.forEach(id=>{ const p=state.pockets.find(x=>x.id===id); if(p){ p.variety=null; p.datePlanted=null; p.override=null; } });
-  persist('pockets'); exitSelectionMode(); renderTower();
-  triggerUndoSnackbar(`Cleared ${count} selected pocket(s)`, ()=>{
-    state.pockets = snapshotPockets;
-    persist('pockets'); renderTower();
-  });
+  if(selectionState.ids.size === 0) return;
+  const selStr = new Set(Array.from(selectionState.ids).map(String));
+  const selectedPockets = state.pockets.filter(p=>selStr.has(String(p.id)));
+  if(selectedPockets.length === 0) return;
+
+  const targetRowIds = new Set(selectedPockets.map(p=>p.rowId).filter(Boolean));
+  if(targetRowIds.size === 0) return;
+
+  const allPocketsInTargetRows = state.pockets.filter(p=>targetRowIds.has(p.rowId));
+  const occupiedPockets = allPocketsInTargetRows.filter(p=>p.variety && String(p.variety).trim());
+
+  if(occupiedPockets.length > 0){
+    if(!await showConfirm(`Clear ${occupiedPockets.length} plant(s) from selected row(s)?`, 'Clear Plants')) return;
+    const snapshotPockets = JSON.parse(JSON.stringify(state.pockets));
+    occupiedPockets.forEach(p=>{ p.variety = null; p.datePlanted = null; p.override = null; });
+    persist('pockets'); exitSelectionMode(); renderTower();
+    showToast(`Cleared ${occupiedPockets.length} plant(s)`, 'clay', 'trash-2');
+    triggerUndoSnackbar(`Cleared ${occupiedPockets.length} plant(s)`, ()=>{
+      state.pockets = snapshotPockets;
+      persist('pockets'); renderTower();
+    });
+  } else {
+    const activeTower = getActiveTower();
+    const activeTowerRows = state.rows.filter(r=>(r.towerId||'t1')===activeTower.id);
+
+    // (2026-07-13) Min 3 rows protected for horizontal towers, 8 for vertical; prev: 8 fixed
+    const minRows = activeTower.type === 'horizontal' ? 3 : 8;
+    const protectedRowIds = new Set(activeTowerRows.slice(0, minRows).map(r=>r.id));
+    const rowsToDelete = activeTowerRows.filter(r=>targetRowIds.has(r.id) && !protectedRowIds.has(r.id));
+
+    if(rowsToDelete.length === 0){
+      showToast(`The first ${minRows} rows of the tower cannot be deleted`, 'clay', 'alert-triangle');
+      return;
+    }
+
+    if(!await showConfirm(`Delete ${rowsToDelete.length} selected row(s)? This cannot be undone.`, 'Delete Row(s)')) return;
+
+    const snapshotPockets = JSON.parse(JSON.stringify(state.pockets));
+    const snapshotRows = JSON.parse(JSON.stringify(state.rows));
+
+    const finalRowIdsToDelete = new Set(rowsToDelete.map(r=>r.id));
+
+    state.rows = state.rows.filter(r=>!finalRowIdsToDelete.has(r.id));
+    state.pockets = state.pockets.filter(p=>!finalRowIdsToDelete.has(p.rowId));
+
+    persist('pockets'); persist('rows'); exitSelectionMode(); renderTower();
+    showToast(`Deleted ${finalRowIdsToDelete.size} row(s)`, 'clay', 'trash-2');
+
+    triggerUndoSnackbar(`Deleted ${finalRowIdsToDelete.size} row(s)`, ()=>{
+      state.pockets = snapshotPockets;
+      state.rows = snapshotRows;
+      persist('pockets'); persist('rows'); renderTower();
+    });
+  }
 });
 document.getElementById('btnSelectionCancel')?.addEventListener('click', exitSelectionMode);
 
@@ -1101,16 +1250,19 @@ function renderTower(){
     const card = document.createElement('div');
     card.className = 'bg-white rounded-2xl shadow-card border border-line p-4 md:p-5 flex flex-col gap-3';
     card.innerHTML = `
-      <!-- (2026-07-13) Add Fill Tier bulk plant button on row card header; prev: text only -->
-      <div class="w-full flex items-center justify-between">
-        <button data-row-select="${row.id}" class="flex-1 flex items-center gap-3 text-left group">
+      <!-- (2026-07-13) Add row delete button to row cards; prev: modal only -->
+      <div class="w-full flex items-center justify-between gap-2">
+        <button data-row-select="${row.id}" class="flex-1 flex items-center gap-3 text-left group min-w-0">
           <span class="w-10 h-10 rounded-2xl bg-mint text-forest flex items-center justify-center flex-shrink-0">${icon('layers','w-5 h-5',20)}</span>
-          <div>
-            <div class="font-semibold text-[15px] text-ink">${rowLabel(row)} <span class="text-ink-soft font-normal text-[13px]">· ${pockets.length} pockets</span></div>
-            <div class="text-[12.5px] text-ink-soft mt-0.5">${rowSummary(row)}</div>
+          <div class="min-w-0">
+            <div class="font-semibold text-[15px] text-ink truncate">${rowLabel(row)} <span class="text-ink-soft font-normal text-[13px]">· ${pockets.length} pockets</span></div>
+            <div class="text-[12.5px] text-ink-soft mt-0.5 truncate">${rowSummary(row)}</div>
           </div>
         </button>
-        <button data-row-fill="${row.id}" class="text-[12px] font-semibold text-forest bg-mint hover:bg-mint/80 px-3 py-1.5 rounded-xl transition-colors flex items-center gap-1 flex-shrink-0 shadow-xs">${icon('layers','w-3.5 h-3.5',14)} Fill Tier</button>
+        <div class="flex items-center gap-1.5 flex-shrink-0">
+          <button data-row-fill="${row.id}" class="text-[12px] font-semibold text-forest bg-mint hover:bg-mint/80 px-3 py-1.5 rounded-xl transition-colors flex items-center gap-1 flex-shrink-0 shadow-xs">${icon('layers','w-3.5 h-3.5',14)} Fill Tier</button>
+          <button data-row-delete="${row.id}" class="w-8 h-8 rounded-xl bg-[#FCEBD8] hover:bg-[#F8DEC0] text-clay flex items-center justify-center transition-colors" title="Delete Row">${icon('trash-2','w-3.5 h-3.5',14)}</button>
+        </div>
       </div>
       <div class="flex gap-3 overflow-x-auto scrollbar-thin py-1">
         ${pockets.map(p=>pocketChipHTML(p)).join('')}
@@ -1126,6 +1278,10 @@ function renderTower(){
 
   list.querySelectorAll('[data-row-select]').forEach(btn=>btn.addEventListener('click', ()=>openRowModal(btn.dataset.rowSelect)));
   list.querySelectorAll('[data-row-fill]').forEach(btn=>btn.addEventListener('click', ()=>openRowModal(btn.dataset.rowFill)));
+  list.querySelectorAll('[data-row-delete]').forEach(btn=>btn.addEventListener('click', (e)=>{
+    e.stopPropagation();
+    deleteRow(btn.dataset.rowDelete);
+  }));
   list.querySelectorAll('[data-pocket-chip]').forEach(btn=>btn.addEventListener('click', (e)=>{
     e.stopPropagation();
     if(selectionState.active) toggleSelect(Number(btn.dataset.pocketChip), !selectionState.ids.has(Number(btn.dataset.pocketChip)));
@@ -2312,15 +2468,32 @@ function openRowModal(rowId){
     pockets.forEach(p=>{ p.variety=null; p.datePlanted=null; p.override=null; });
     persist('pockets'); closeModal('rowModal'); renderTower();
   });
-  document.getElementById('btnDeleteRow').addEventListener('click', async ()=>{
-    if(state.rows.length<=1){ showToast('You need at least one row','clay','alert-triangle'); return; }
-    if(!await showConfirm(`Delete ${rowLabel(row)} and its ${pockets.length} pockets? This can't be undone.`, 'Delete Row')) return;
-    state.pockets = state.pockets.filter(p=>p.rowId!==rowId);
-    state.rows = state.rows.filter(r=>r.id!==rowId);
-    persist('pockets'); persist('rows'); closeModal('rowModal'); renderTower();
-    showToast('Row deleted','clay','trash-2');
-  });
+  // (2026-07-13) Standalone row deletion helper; prev: inline modal logic
+  document.getElementById('btnDeleteRow').addEventListener('click', ()=>deleteRow(rowId));
   document.getElementById('rowModal').classList.remove('hidden');
+}
+
+async function deleteRow(rowId){
+  const row = state.rows.find(r=>r.id===rowId);
+  if(!row) return;
+  const towerRows = state.rows.filter(r=>(r.towerId||'t1')===(row.towerId||'t1'));
+  const rowIndex = towerRows.findIndex(r=>r.id===rowId);
+  // (2026-07-13) Min 3 rows protected for horizontal towers, 8 for vertical; prev: 8 fixed
+  const activeTower = state.towers.find(t=>t.id===(row.towerId||'t1')) || getActiveTower();
+  const minRows = activeTower.type === 'horizontal' ? 3 : 8;
+  if(rowIndex < minRows || towerRows.length <= minRows){
+    showToast(`The first ${minRows} rows of the tower cannot be deleted`,'clay','alert-triangle');
+    return;
+  }
+  const pockets = state.pockets.filter(p=>p.rowId===rowId);
+  if(!await showConfirm(`Delete ${rowLabel(row)} and its ${pockets.length} pockets? This can't be undone.`, 'Delete Row')) return;
+  state.pockets = state.pockets.filter(p=>p.rowId!==rowId);
+  state.rows = state.rows.filter(r=>r.id!==rowId);
+  persist('pockets'); persist('rows');
+  const modal = document.getElementById('rowModal');
+  if(modal && !modal.classList.contains('hidden')) closeModal('rowModal');
+  renderTower();
+  showToast('Row deleted','clay','trash-2');
 }
 
 // (2026-07-13) Support type, custom rows (default 8) & cols in newTowerForm
@@ -2368,18 +2541,39 @@ document.getElementById('newTowerForm')?.addEventListener('submit', (e)=>{
   showToast(`Created ${name} with ${rowCount} rows`,'forest','plus');
 });
 
+// (2026-07-13) Disallow deleting default Main Tower; prev: deletable if multi-tower
 document.getElementById('btnRenameTower')?.addEventListener('click', ()=>{
   const activeTower = getActiveTower();
   document.getElementById('renameTowerInput').value = activeTower.name;
-  document.getElementById('deleteTowerHint')?.classList.toggle('hidden', state.towers.length>1);
-  document.getElementById('btnDeleteTower')?.toggleAttribute('disabled', state.towers.length<=1);
-  document.getElementById('btnDeleteTower')?.classList.toggle('opacity-40', state.towers.length<=1);
-  document.getElementById('btnDeleteTower')?.classList.toggle('pointer-events-none', state.towers.length<=1);
+  const isMainTower = activeTower.id === 't1' || (activeTower.name && activeTower.name.toLowerCase() === 'main tower');
+  const deleteBtn = document.getElementById('btnDeleteTower');
+  const deleteHint = document.getElementById('deleteTowerHint');
+  if(isMainTower){
+    deleteBtn?.classList.add('hidden');
+    if(deleteHint){
+      deleteHint.textContent = 'The default Main Tower cannot be deleted.';
+      deleteHint.classList.remove('hidden');
+    }
+  } else {
+    deleteBtn?.classList.remove('hidden');
+    const canDelete = state.towers.length > 1;
+    deleteBtn?.toggleAttribute('disabled', !canDelete);
+    deleteBtn?.classList.toggle('opacity-40', !canDelete);
+    deleteBtn?.classList.toggle('pointer-events-none', !canDelete);
+    if(deleteHint){
+      deleteHint.textContent = 'You need at least one tower — add another before deleting this one.';
+      deleteHint.classList.toggle('hidden', canDelete);
+    }
+  }
   document.getElementById('renameTowerModal').classList.remove('hidden');
 });
 document.getElementById('btnDeleteTower')?.addEventListener('click', ()=>{
-  if(state.towers.length<=1) return;
   const activeTower = getActiveTower();
+  const isMainTower = activeTower.id === 't1' || (activeTower.name && activeTower.name.toLowerCase() === 'main tower');
+  if(isMainTower || state.towers.length<=1){
+    showToast('The Main Tower cannot be deleted','clay','alert-triangle');
+    return;
+  }
   if(!confirm(`Delete "${activeTower.name}" and every row and pocket in it? This can't be undone.`)) return;
   const snapshotTowers = JSON.parse(JSON.stringify(state.towers));
   const snapshotRows = JSON.parse(JSON.stringify(state.rows));
@@ -2419,23 +2613,23 @@ document.getElementById('renameTowerForm')?.addEventListener('submit', (e)=>{
 });
 
 /* ---- Add Row ---- */
+// (2026-07-13) Direct row add without modal; prev: opened addRowModal
 document.getElementById('btnAddRow').addEventListener('click', ()=>{
   const activeTower = getActiveTower();
-  document.getElementById('addRowCount').value = activeTower.type==='horizontal' ? 8 : 3;
-  document.getElementById('addRowModal').classList.remove('hidden');
-});
-document.getElementById('addRowForm').addEventListener('submit', (e)=>{
-  e.preventDefault();
-  const activeTower = getActiveTower();
-  const count = Math.max(1, Math.min(16, Number(document.getElementById('addRowCount').value)||3));
+  const towerRows = state.rows.filter(r=>(r.towerId||'t1')===activeTower.id);
+  // Derive pocket count from existing rows; fallback 3 for vertical, 8 for horizontal
+  const count = towerRows.length > 0
+    ? towerRows[0].potCount
+    : (activeTower.type==='horizontal' ? 8 : 3);
   const newRow = { id: uid(), towerId: activeTower.id, potCount: count };
   state.rows.push(newRow);
   const maxId = state.pockets.reduce((m,p)=>Math.max(m,p.id),0);
   for(let i=0;i<count;i++) state.pockets.push({ id:maxId+i+1, rowId:newRow.id, variety:null, datePlanted:null, override:null });
   persist('rows'); persist('pockets');
-  closeModal('addRowModal'); renderTower();
+  renderTower();
   showToast(`${rowLabel(newRow)} added with ${count} pockets`,'forest','list-plus');
 });
+document.getElementById('addRowForm')?.addEventListener('submit', (e)=>{ e.preventDefault(); closeModal('addRowModal'); });
 
 // (2026-07-13) Fix pocket lookup using string matching; prev: strict x.id===id
 function openPocketModal(id){
@@ -2612,7 +2806,12 @@ function openReturnTrayModal(pocketId){
   document.getElementById('returnTrayModal').classList.remove('hidden');
 }
 
-function closeModal(id){ document.getElementById(id).classList.add('hidden'); }
+// (2026-07-13) Unselect plant on tray when closing plant modal; prev: modal hide only
+function closeModal(id){
+  const el = document.getElementById(id);
+  if(el) el.classList.add('hidden');
+  if(id === 'trayCellModal' || id === 'pocketModal') trayCellClearSelection();
+}
 // (2026-07-13) Add newTowerModalClose and renameTowerModalClose handlers
 document.getElementById('newTowerModalClose')?.addEventListener('click', ()=>closeModal('newTowerModal'));
 document.getElementById('renameTowerModalClose')?.addEventListener('click', ()=>closeModal('renameTowerModal'));
@@ -2626,7 +2825,12 @@ document.getElementById('expenseModalClose').addEventListener('click', ()=>close
 document.getElementById('harvestModalClose').addEventListener('click', ()=>closeModal('harvestModal'));
 // (2026-07-13) Add reservoirModalClose listener; prev: none
 document.getElementById('reservoirModalClose')?.addEventListener('click', ()=>closeModal('reservoirModal'));
-document.querySelectorAll('.modal-backdrop').forEach(m=>m.addEventListener('click', (e)=>{ if(e.target===m) m.classList.add('hidden'); }));
+document.querySelectorAll('.modal-backdrop').forEach(m=>m.addEventListener('click', (e)=>{
+  if(e.target===m){
+    m.classList.add('hidden');
+    if(m.id === 'trayCellModal' || m.id === 'pocketModal') trayCellClearSelection();
+  }
+}));
 
 /* ================= RESERVOIR & DOSING CALCULATOR ================= */
 // (2026-07-13) Automated Dosing Calculator for pH & SNAP Nutrients; prev: none
@@ -2732,7 +2936,8 @@ function updateReservoirDosingSuggestion(){
 /* ================= NURSERY ================= */
 // (2026-07-13) Define traySelection and drag selection state; prev: syntax error
 const traySelection = { trayId:null, indices:new Set() };
-const tlp = { timer:null, activeTrayId:null, fired:false, dragging:false, startX:0, startY:0 };
+// (2026-07-13) Support drag select and unselect modes on tray cells; prev: select only
+const tlp = { timer:null, activeTrayId:null, fired:false, dragging:false, startX:0, startY:0, mode:'select' };
 function trayCellSelect(trayId, idx){
   if(traySelection.trayId!==trayId){ traySelection.trayId=trayId; traySelection.indices=new Set(); }
   if(!traySelection.indices.has(idx)){
@@ -2740,10 +2945,16 @@ function trayCellSelect(trayId, idx){
     renderNursery();
   }
 }
-// (2026-07-13) Add health state to seedling tray cells; prev: filled only
+function trayCellDeselect(trayId, idx){
+  if(traySelection.trayId===trayId && traySelection.indices.has(idx)){
+    traySelection.indices.delete(idx);
+    renderNursery();
+  }
+}
+// (2026-07-13) Clamp grid dimensions to max 10; prev: max 20
 function getTrayCells(tray){
-  const rows = tray.gridRows || 3;
-  const cols = tray.gridCols || 4;
+  const rows = Math.min(10, Math.max(1, tray.gridRows || 3));
+  const cols = Math.min(10, Math.max(1, tray.gridCols || 4));
   const total = rows * cols;
   if(!tray.cells || tray.cells.length !== total){
     const filledCount = tray.count !== undefined ? tray.count : total;
@@ -2785,7 +2996,7 @@ function renderNursery(){
     const stage = stageForDay(day);
     const ready = day>=12;
     const est = nextTransitionInfo(day, stage);
-    const cols = t.gridCols || Math.min(6, t.count) || 4;
+    const cols = Math.min(10, Math.max(1, t.gridCols || Math.min(6, t.count) || 4));
     const selectedHere = traySelection.trayId===t.id ? traySelection.indices : new Set();
 
     // (2026-07-13) Upgrade seedling card & rockwool tray grid UI; prev: dark grid
@@ -2834,25 +3045,24 @@ function renderNursery(){
       </div>
       <div class="text-[11.5px] text-ink-soft mb-3 flex items-center gap-1.5 font-medium">${icon('timer','w-3.5 h-3.5 flex-shrink-0 text-forest',14)} ${ready? 'Ready now' : `${est.label} in ${est.daysUntil}d (${fmtDate(est.date)})`}</div>
 
-      <!-- (2026-07-13) Apply dark nursery tray bed & green cell selection classes; prev: Tailwind inline hex -->
-      <div class="rounded-xl p-3 mb-3 nursery-tray-bed">
-        <div class="grid gap-1 sm:gap-1.5 touch-none" style="grid-template-columns:repeat(${cols},1fr)" data-tray-grid="${t.id}"></div>
+      <div class="rounded-xl p-3 mb-3 nursery-tray-bed overflow-auto max-h-[300px]">
+        <div class="grid gap-1 sm:gap-1.5 touch-pan-y" style="grid-template-columns:repeat(${cols},minmax(0,1fr));touch-action:pan-y;" data-tray-grid="${t.id}"></div>
       </div>
 
+      <!-- (2026-07-13) Fix missing closing div & button cramming; prev: unclosed flex div -->
       <div class="flex items-center justify-between mb-3">
-        <button data-tray-select-all="${t.id}" class="text-[12px] font-semibold text-forest hover:text-forest/80 transition-colors">Select all ${t.count}</button>
-        ${selectedHere.size>0 ? `<span class="text-[12px] font-semibold text-forest bg-mint/60 px-2 py-0.5 rounded-md">${selectedHere.size} selected</span>` : ''}
+        <button data-tray-select-all="${t.id}" class="text-[12px] font-semibold text-forest hover:text-forest/80 transition-colors whitespace-nowrap">Select all ${t.count}</button>
+        ${selectedHere.size>0 ? `<span class="text-[12px] font-semibold text-forest bg-mint/60 px-2.5 py-0.5 rounded-md whitespace-nowrap">${selectedHere.size} selected</span>` : ''}
       </div>
-      <!-- (2026-07-13) Add single cell edit button & health styling; prev: bulk action -->
-      <div class="flex gap-2 mt-auto">
+      <div class="flex items-center gap-1.5 mt-auto">
         ${selectedHere.size>0
-          ? `${selectedHere.size===1 ? `<button data-tray-edit-cell="${t.id}" data-cell-idx="${Array.from(selectedHere)[0]}" class="text-[12.5px] font-semibold text-forest bg-mint hover:bg-mint/80 rounded-xl py-2.5 px-3 transition-colors flex items-center justify-center gap-1">${icon('pencil','w-3.5 h-3.5',14)} Edit</button>` : ''}
-             <button data-tray-move="${t.id}" class="flex-1 text-[12.5px] font-semibold text-white bg-forest hover:bg-forest/90 rounded-xl py-2.5 flex items-center justify-center gap-1.5 transition-colors shadow-xs">${icon('move-up-right','w-3.5 h-3.5',14)} Move ${selectedHere.size} to Tower</button>
-             <button data-tray-clear-sel="${t.id}" class="text-[12.5px] font-medium text-ink-soft bg-cream hover:bg-cream-dark rounded-xl py-2.5 px-3 transition-colors">${icon('x','w-3.5 h-3.5',14)}</button>`
+          ? `<button data-tray-edit-cell="${t.id}" class="text-[12px] font-semibold text-forest bg-mint hover:bg-mint/80 rounded-xl py-2 px-2.5 transition-colors flex items-center justify-center gap-1 whitespace-nowrap flex-shrink-0">${icon('pencil','w-3.5 h-3.5 flex-shrink-0',14)} Edit${selectedHere.size>1 ? ` (${selectedHere.size})` : ''}</button>
+             <button data-tray-move="${t.id}" class="flex-1 min-w-0 text-[12px] font-semibold text-white bg-forest hover:bg-forest/90 rounded-xl py-2 px-2.5 flex items-center justify-center gap-1 transition-colors shadow-xs whitespace-nowrap truncate">${icon('move-up-right','w-3.5 h-3.5 flex-shrink-0',14)} Move ${selectedHere.size} to Tower</button>
+             <button data-tray-clear-sel="${t.id}" class="text-[12px] font-medium text-ink-soft bg-cream hover:bg-cream-dark rounded-xl py-2 px-2.5 transition-colors flex-shrink-0" title="Deselect">${icon('x','w-3.5 h-3.5 flex-shrink-0',14)}</button>`
           : ready
-            ? `<button data-tray-transplant="${t.id}" class="flex-1 text-[12.5px] font-semibold text-white bg-forest hover:bg-forest/90 rounded-xl py-2.5 flex items-center justify-center gap-1.5 transition-colors shadow-xs">${icon('move-up-right','w-3.5 h-3.5',14)} Move All to Tower</button>`
-            : `<span class="flex-1 text-center text-[12px] font-medium text-ink-soft bg-cream/70 border border-line/60 rounded-xl py-2.5">Ready on ${fmtDate(addDays(t.startDate,12))}</span>`}
-        <button data-tray-remove="${t.id}" class="text-[12.5px] font-medium text-clay bg-[#FCEBD8] hover:bg-[#F8DEC0] rounded-xl py-2.5 px-3 transition-colors">${icon('trash-2','w-3.5 h-3.5',14)}</button>
+            ? `<button data-tray-transplant="${t.id}" class="flex-1 min-w-0 text-[12px] font-semibold text-white bg-forest hover:bg-forest/90 rounded-xl py-2 flex items-center justify-center gap-1.5 transition-colors shadow-xs whitespace-nowrap">${icon('move-up-right','w-3.5 h-3.5 flex-shrink-0',14)} Move All to Tower</button>`
+            : `<span class="flex-1 text-center text-[11.5px] font-medium text-ink-soft bg-cream/70 border border-line/60 rounded-xl py-2 whitespace-nowrap">Ready on ${fmtDate(addDays(t.startDate,12))}</span>`}
+        <button data-tray-remove="${t.id}" class="text-[12px] font-medium text-clay bg-[#FCEBD8] hover:bg-[#F8DEC0] rounded-xl py-2 px-2.5 transition-colors flex-shrink-0" title="Delete Tray">${icon('trash-2','w-3.5 h-3.5 flex-shrink-0',14)}</button>
       </div>`;
     list.appendChild(card);
 
@@ -2868,40 +3078,46 @@ function renderNursery(){
       const cellHealth = cellData.health || 'healthy';
       const healthBorder = cellHealth === 'unhealthy' ? 'ring-2 ring-[#F59E0B] bg-[#FEF3C7]/40' : cellHealth === 'dead' ? 'ring-2 ring-[#EF4444] bg-[#FEE2E2]/40 opacity-75' : '';
       const healthBadge = cellHealth === 'unhealthy' ? `<span class="absolute -top-1 -right-1">${icon('alert-triangle','w-3 h-3 text-[#D97706]',12)}</span>` : cellHealth === 'dead' ? `<span class="absolute -top-1 -right-1">${icon('x-circle','w-3 h-3 text-[#DC2626]',12)}</span>` : '';
+      // (2026-07-13) Add prominent checkmark badge on top-left of selected cell; prev: border only
+      const checkBadge = isSelected ? `<span class="absolute -top-1 -left-1 w-4 h-4 bg-[#22C55E] text-white rounded-full flex items-center justify-center shadow-md z-10">${icon('check','w-2.5 h-2.5 text-white',10)}</span>` : '';
 
       // (2026-07-13) Add health class so CSS can override selected green; prev: no health class on el
       const healthClass = isFilled && cellHealth !== 'healthy' ? `health-${cellHealth}` : '';
-      cell.className = `aspect-square rounded-md flex items-center justify-center cursor-pointer touch-none nursery-cell-cube relative transition-all ${healthClass} ${isFilled ? (isSelected ? 'selected ' : '') + healthBorder : 'opacity-40 border border-dashed border-line/60 bg-black/10 hover:opacity-80 hover:border-forest/60 hover:bg-mint/20'}`;
+      // (2026-07-13) Use touch-pan-y on nursery cell cubes; prev: touch-none
+      cell.className = `aspect-square rounded-md flex items-center justify-center cursor-pointer touch-pan-y nursery-cell-cube relative transition-all ${healthClass} ${isFilled ? (isSelected ? 'selected ' : '') + healthBorder : 'opacity-40 border border-dashed border-line/60 bg-black/10 hover:opacity-80 hover:border-forest/60 hover:bg-mint/20'}`;
       cell.setAttribute('aria-label', `Cell ${i+1} [${cellData.id}], ${t.variety}${isFilled ? (isSelected ? ', selected' : '') : ', empty (tap to plant)'}`);
       cell.setAttribute('aria-pressed', String(isSelected));
-      cell.innerHTML = isFilled ? `${plantIcon(stage.key, 22)}${healthBadge}` : `<span class="text-[9px] font-mono text-ink-soft/60">${cellData.id}</span>`;
+      cell.innerHTML = isFilled ? `${checkBadge}${plantIcon(stage.key, 22)}${healthBadge}` : `<span class="text-[9px] font-mono text-ink-soft/60">${cellData.id}</span>`;
       
       if(isFilled){
+        // (2026-07-13) Set mode select/unselect on longpress drag; prev: select only
         cell.addEventListener('pointerdown', (e)=>{
           tlp.activeTrayId = t.id;
           tlp.startX = e.clientX; tlp.startY = e.clientY;
           tlp.fired = false; tlp.dragging = false;
+          tlp.mode = isSelected ? 'unselect' : 'select';
           tlp.timer = setTimeout(()=>{
             tlp.fired = true; tlp.dragging = true;
-            trayCellSelect(t.id, i);
+            if(tlp.mode === 'unselect') trayCellDeselect(t.id, i); else trayCellSelect(t.id, i);
             try{ cell.setPointerCapture(e.pointerId); }catch(err){}
             if(navigator.vibrate) navigator.vibrate(12);
-          }, 220);
+          }, 180);
         });
         cell.addEventListener('pointermove', (e)=>{
           if(tlp.timer && !tlp.fired){
-            if(Math.hypot(e.clientX - tlp.startX, e.clientY - tlp.startY) > 8){
+            if(Math.hypot(e.clientX - tlp.startX, e.clientY - tlp.startY) > 12){
               clearTimeout(tlp.timer); tlp.timer = null;
             }
           }
           if(tlp.dragging){
+            if(e.cancelable) e.preventDefault();
             const under = document.elementFromPoint(e.clientX, e.clientY);
             const targetCell = under && under.closest && under.closest('[data-cell-idx]');
             if(targetCell){
               const tId = targetCell.dataset.trayId;
               const cIdx = Number(targetCell.dataset.cellIdx);
               if(tId === t.id && !isNaN(cIdx)){
-                trayCellSelect(tId, cIdx);
+                if(tlp.mode === 'unselect') trayCellDeselect(tId, cIdx); else trayCellSelect(tId, cIdx);
               }
             }
           }
@@ -2962,88 +3178,104 @@ function renderNursery(){
       persist('trays'); renderNursery();
     });
   }));
-  // (2026-07-13) Wire edit tray button & cell edit button; prev: edit tray only
+  // (2026-07-13) Wire single or multi-cell edit button; prev: single cell idx only
   list.querySelectorAll('[data-tray-edit]').forEach(btn=>btn.addEventListener('click', ()=>openEditTrayModal(btn.dataset.trayEdit)));
-  list.querySelectorAll('[data-tray-edit-cell]').forEach(btn=>btn.addEventListener('click', ()=>openTrayCellModal(btn.dataset.trayEditCell, Number(btn.dataset.cellIdx))));
+  list.querySelectorAll('[data-tray-edit-cell]').forEach(btn=>btn.addEventListener('click', ()=>{
+    const tId = btn.dataset.trayEditCell;
+    const selArray = (traySelection.trayId === tId && traySelection.indices.size > 0) ? Array.from(traySelection.indices) : (btn.dataset.cellIdx !== undefined ? [Number(btn.dataset.cellIdx)] : []);
+    if(selArray.length > 0) openTrayCellModal(tId, selArray);
+  }));
 }
 
-// (2026-07-13) Modal logic to edit health status of specific tray seedling cell; prev: none
-function openTrayCellModal(trayId, cellIdx){
+// (2026-07-13) Support batch editing single or multiple selected tray cells; prev: single cell only
+function openTrayCellModal(trayId, cellIndices){
   const tray = state.trays.find(t=>t.id===trayId);
   if(!tray) return;
   const cells = getTrayCells(tray);
-  const cell = cells[cellIdx];
-  if(!cell) return;
-  // (2026-07-13) Normalize cell.health so single-tap works; prev: || fallback in template
-  if(!cell.health) cell.health = 'healthy';
-  const health = cell.health;
+  const targetIndices = Array.isArray(cellIndices) ? cellIndices : [cellIndices];
+  if(targetIndices.length === 0) return;
+
+  const isMulti = targetIndices.length > 1;
+  const firstCell = cells[targetIndices[0]];
+  if(!firstCell) return;
+
+  const titleText = isMulti ? `Tray "${tray.variety}" · ${targetIndices.length} Seedlings Selected` : `Tray "${tray.variety}" · Cell #${targetIndices[0]+1} [${firstCell.id}]`;
+  document.getElementById('trayCellModalTitle').textContent = titleText;
   
-  document.getElementById('trayCellModalTitle').textContent = `Tray "${tray.variety}" · Cell #${cellIdx+1} [${cell.id}]`;
   const body = document.getElementById('trayCellModalBody');
+  const health = isMulti ? 'healthy' : (firstCell.health || 'healthy');
+  
   body.innerHTML = `
     <div class="bg-cream rounded-xl p-3.5 mb-4">
-      <div class="text-[13px] font-semibold text-ink mb-1">Seedling Cell Details</div>
-      <div class="text-[12px] text-ink-soft">Variety: <strong>${tray.variety}</strong> · Status: ${cell.filled?'Planted':'Empty'}</div>
+      <div class="text-[13px] font-semibold text-ink mb-1">${isMulti ? `Batch Editing ${targetIndices.length} Selected Seedlings` : 'Seedling Cell Details'}</div>
+      <div class="text-[12px] text-ink-soft">Variety: <strong>${tray.variety}</strong> · ${isMulti ? `${targetIndices.length} cells selected` : `Status: ${firstCell.filled?'Planted':'Empty'}`}</div>
     </div>
-    <!-- (2026-07-13) SVG icons & yellow/red theme for tray cell health; prev: emojis -->
     <label class="text-[12px] font-semibold text-ink-soft mb-2 block">Seedling Health / Condition</label>
     <div class="grid grid-cols-3 gap-2 mb-4">
-    <!-- (2026-07-13) Remove bg-white from inactive state so active bg renders; prev: bg-white conflict -->
-    <button id="btnCellHealthHealthy" class="py-2.5 px-1 text-[12.5px] rounded-xl border flex items-center justify-center gap-1.5 transition-all ${health==='healthy'?'bg-[#DCFCE7] border-[#22C55E] text-[#15803D] font-semibold shadow-sm':'border-line text-ink-soft'}">${icon('circle-check','w-4 h-4',16)} Healthy</button>
-      <button id="btnCellHealthUnhealthy" class="py-2.5 px-1 text-[12.5px] rounded-xl border flex items-center justify-center gap-1.5 transition-all ${health==='unhealthy'?'bg-[#FEF3C7] border-[#F59E0B] text-[#92400E] font-semibold shadow-sm':'border-line text-ink-soft'}">${icon('alert-triangle','w-4 h-4',16)} Unhealthy</button>
-      <button id="btnCellHealthDead" class="py-2.5 px-1 text-[12.5px] rounded-xl border flex items-center justify-center gap-1.5 transition-all ${health==='dead'?'bg-[#FEE2E2] border-[#EF4444] text-[#991B1B] font-semibold shadow-sm':'border-line text-ink-soft'}">${icon('x-circle','w-4 h-4',16)} Dead</button>
+      <button id="btnCellHealthHealthy" class="py-2.5 px-1 text-[12.5px] rounded-xl border flex items-center justify-center gap-1.5 transition-all ${!isMulti && health==='healthy'?'bg-[#DCFCE7] border-[#22C55E] text-[#15803D] font-semibold shadow-sm':'border-line text-ink-soft'}">${icon('circle-check','w-4 h-4',16)} Healthy</button>
+      <button id="btnCellHealthUnhealthy" class="py-2.5 px-1 text-[12.5px] rounded-xl border flex items-center justify-center gap-1.5 transition-all ${!isMulti && health==='unhealthy'?'bg-[#FEF3C7] border-[#F59E0B] text-[#92400E] font-semibold shadow-sm':'border-line text-ink-soft'}">${icon('alert-triangle','w-4 h-4',16)} Unhealthy</button>
+      <button id="btnCellHealthDead" class="py-2.5 px-1 text-[12.5px] rounded-xl border flex items-center justify-center gap-1.5 transition-all ${!isMulti && health==='dead'?'bg-[#FEE2E2] border-[#EF4444] text-[#991B1B] font-semibold shadow-sm':'border-line text-ink-soft'}">${icon('x-circle','w-4 h-4',16)} Dead</button>
     </div>
-    <!-- (2026-07-13) Add photo attachment preview to seedling cell modal; prev: none -->
+    ${!isMulti ? `
     <div class="mb-4 bg-cream/40 p-3 rounded-xl border border-line/60">
       <label class="text-[12px] font-semibold text-ink-soft mb-1.5 flex items-center justify-between cursor-pointer">
         <span>📷 Seedling Photo</span>
-        <span class="text-[11.5px] font-semibold text-forest underline">${cell.photo?'Change Photo':'Attach Photo'}</span>
+        <span class="text-[11.5px] font-semibold text-forest underline">${firstCell.photo?'Change Photo':'Attach Photo'}</span>
         <input id="cellPhotoInput" type="file" accept="image/*" class="hidden">
       </label>
-      ${cell.photo ? `<div class="relative mt-1 max-h-[120px] rounded-lg overflow-hidden border border-line bg-black/5 flex items-center justify-center">
-        <img src="${cell.photo}" class="max-h-[120px] object-contain rounded-lg" alt="Seedling Photo">
+      ${firstCell.photo ? `<div class="relative mt-1 max-h-[120px] rounded-lg overflow-hidden border border-line bg-black/5 flex items-center justify-center">
+        <img src="${firstCell.photo}" class="max-h-[120px] object-contain rounded-lg" alt="Seedling Photo">
         <button id="btnRemoveCellPhoto" class="absolute top-1.5 right-1.5 w-6 h-6 bg-black/60 text-white rounded-full flex items-center justify-center text-[10px]">✕</button>
       </div>` : '<p class="text-[11px] text-ink-soft">Attach a photo for this seedling cell.</p>'}
-    </div>
+    </div>` : ''}
     <div class="flex flex-col gap-2">
-      <button id="btnClearDeadCell" class="w-full text-[12.5px] font-medium text-clay bg-[#FCEBD8] hover:bg-[#F8DEC0] rounded-xl py-2.5 flex items-center justify-center gap-1.5 transition-colors">${icon('trash-2','w-4 h-4',16)} Clear / Remove Dead Seedling</button>
+      <button id="btnClearDeadCell" class="w-full text-[12.5px] font-medium text-clay bg-[#FCEBD8] hover:bg-[#F8DEC0] rounded-xl py-2.5 flex items-center justify-center gap-1.5 transition-colors">${icon('trash-2','w-4 h-4',16)} ${isMulti ? `Clear / Remove ${targetIndices.length} Selected Seedlings` : 'Clear / Remove Dead Seedling'}</button>
     </div>`;
 
   const setHealth = (h)=>{
-    cell.health = h;
-    logActivityNotification('⚠️ Seedling Health Updated', `Tray ${tray.variety} Cell #${cellIdx+1} marked as ${h}`, 'alert-triangle');
+    targetIndices.forEach(idx => {
+      if(cells[idx]) cells[idx].health = h;
+    });
+    logActivityNotification('⚠️ Seedling Health Updated', `Tray ${tray.variety} ${targetIndices.length} cell(s) marked as ${h}`, 'alert-triangle');
     persist('trays');
-    openTrayCellModal(trayId, cellIdx);
+    closeModal('trayCellModal');
     renderNursery();
-    showToast(`Cell #${cellIdx+1} marked as ${h}`,'forest','sprout');
+    showToast(`${targetIndices.length} seedling(s) marked as ${h}`,'forest','sprout');
   };
   document.getElementById('btnCellHealthHealthy')?.addEventListener('click', ()=>setHealth('healthy'));
   document.getElementById('btnCellHealthUnhealthy')?.addEventListener('click', ()=>setHealth('unhealthy'));
   document.getElementById('btnCellHealthDead')?.addEventListener('click', ()=>setHealth('dead'));
 
-  document.getElementById('cellPhotoInput')?.addEventListener('change', (e)=>{
-    const file = e.target.files[0]; if(!file) return;
-    const reader = new FileReader();
-    reader.onload = ()=>{
-      cell.photo = reader.result;
-      persist('trays'); openTrayCellModal(trayId, cellIdx);
-      showToast('Seedling photo attached','forest','camera');
-    };
-    reader.readAsDataURL(file);
-  });
-  document.getElementById('btnRemoveCellPhoto')?.addEventListener('click', ()=>{
-    delete cell.photo;
-    persist('trays'); openTrayCellModal(trayId, cellIdx);
-  });
+  if(!isMulti){
+    document.getElementById('cellPhotoInput')?.addEventListener('change', (e)=>{
+      const file = e.target.files[0]; if(!file) return;
+      const reader = new FileReader();
+      reader.onload = ()=>{
+        firstCell.photo = reader.result;
+        persist('trays'); openTrayCellModal(trayId, cellIndices);
+        showToast('Seedling photo attached','forest','camera');
+      };
+      reader.readAsDataURL(file);
+    });
+    document.getElementById('btnRemoveCellPhoto')?.addEventListener('click', ()=>{
+      delete firstCell.photo;
+      persist('trays'); openTrayCellModal(trayId, cellIndices);
+    });
+  }
+
   document.getElementById('btnClearDeadCell')?.addEventListener('click', ()=>{
     const snapshotTrays = JSON.parse(JSON.stringify(state.trays));
-    cell.filled = false;
-    cell.health = 'healthy';
+    targetIndices.forEach(idx => {
+      if(cells[idx]){
+        cells[idx].filled = false;
+        cells[idx].health = 'healthy';
+      }
+    });
     tray.count = cells.filter(c=>c.filled).length;
     persist('trays');
     closeModal('trayCellModal');
     renderNursery();
-    triggerUndoSnackbar(`Removed seedling from cell [${cell.id}]`, ()=>{
+    triggerUndoSnackbar(`Removed ${targetIndices.length} seedling(s) from tray`, ()=>{
       state.trays = snapshotTrays;
       persist('trays');
       renderNursery();
@@ -3085,7 +3317,12 @@ function openEditTrayModal(trayId){
   const colsEl = document.getElementById('editTrayGridCols');
   if(!rowsEl.dataset.wired){
     rowsEl.dataset.wired='1';
-    const upd=()=>document.getElementById('editTrayCalcCount').textContent=Math.max(1,Number(rowsEl.value)||1)*Math.max(1,Number(colsEl.value)||1);
+    // (2026-07-13) Enforce 1-10 row/col limit on edit tray; prev: max 20
+    const upd=()=>{
+      const r = Math.min(10, Math.max(1, Number(rowsEl.value)||1));
+      const c = Math.min(10, Math.max(1, Number(colsEl.value)||1));
+      document.getElementById('editTrayCalcCount').textContent=r*c;
+    };
     rowsEl.addEventListener('input',upd); colsEl.addEventListener('input',upd);
   }
 
@@ -3101,8 +3338,8 @@ document.getElementById('editTrayForm')?.addEventListener('submit',(e)=>{
   const presetVariety = document.getElementById('editTrayVariety')?.value;
   tray.variety = customName || (presetVariety==='__custom__' ? tray.variety : presetVariety) || tray.variety;
   tray.startDate = document.getElementById('editTrayDate').value || tray.startDate;
-  const r = Math.max(1, Number(document.getElementById('editTrayGridRows')?.value)||1);
-  const c = Math.max(1, Number(document.getElementById('editTrayGridCols')?.value)||1);
+  const r = Math.min(10, Math.max(1, Number(document.getElementById('editTrayGridRows')?.value)||1));
+  const c = Math.min(10, Math.max(1, Number(document.getElementById('editTrayGridCols')?.value)||1));
   tray.count = r * c; tray.gridRows = r; tray.gridCols = c; tray.dimensions = `${r}×${c}`;
   persist('trays'); closeModal('editTrayModal'); renderNursery();
   showToast(`Tray updated`,'forest','pencil');
@@ -3116,9 +3353,10 @@ document.getElementById('btnAddTray').addEventListener('click', ()=>{
   document.getElementById('trayDate').value = todayISO();
   const rowsEl = document.getElementById('trayGridRows');
   const colsEl = document.getElementById('trayGridCols');
+  // (2026-07-13) Enforce 1-10 row/col limit on new tray; prev: max 20
   const updateCalc = ()=>{
-    const r = Math.max(1, Number(rowsEl?.value)||1);
-    const c = Math.max(1, Number(colsEl?.value)||1);
+    const r = Math.min(10, Math.max(1, Number(rowsEl?.value)||1));
+    const c = Math.min(10, Math.max(1, Number(colsEl?.value)||1));
     const tot = r * c;
     const calcEl = document.getElementById('trayCalcCount');
     const cntEl = document.getElementById('trayCount');
@@ -3138,8 +3376,8 @@ document.getElementById('trayForm').addEventListener('submit', (e)=>{
   const customName = document.getElementById('trayCustomName')?.value.trim();
   const presetVariety = document.getElementById('trayVariety')?.value;
   const variety = customName || presetVariety || 'Custom Crop';
-  const r = Math.max(1, Number(document.getElementById('trayGridRows')?.value)||1);
-  const c = Math.max(1, Number(document.getElementById('trayGridCols')?.value)||1);
+  const r = Math.min(10, Math.max(1, Number(document.getElementById('trayGridRows')?.value)||1));
+  const c = Math.min(10, Math.max(1, Number(document.getElementById('trayGridCols')?.value)||1));
   const count = r * c;
   const dimensions = `${r}×${c}`;
   state.trays.push({ id: uid(), variety, startDate: document.getElementById('trayDate').value || todayISO(), count, gridRows:r, gridCols:c, dimensions });
@@ -3473,10 +3711,18 @@ document.querySelectorAll('.weather-sim-btn').forEach(btn=>btn.addEventListener(
   renderAlertBanner('alertBanner'); renderAlertBanner('alertBanner2'); renderAlertLog();
   showToast(alert.title, type==='rain'?'forest':'clay', type==='rain'?'cloud-rain':'wind');
 }));
+// (2026-07-13) Native mobile toast message on grant; prev: browser tab
 async function requestBrowserNotifs(){
-  if(!('Notification' in window)){ showToast('Notifications are not supported in this browser','clay','alert-triangle'); return; }
+  if(typeof notificationManager !== 'undefined' && notificationManager.requestPermissions){
+    await notificationManager.requestPermissions();
+    state.settings.browserNotifs=true; persist('settings');
+    showToast('Mobile notifications enabled — daily reminders scheduled','forest','bell');
+    document.getElementById('firstPlantPrompt')?.classList.add('hidden');
+    return;
+  }
+  if(!('Notification' in window)){ showToast('Notifications are not supported on this device','clay','alert-triangle'); return; }
   const perm = await Notification.requestPermission();
-  if(perm==='granted'){ state.settings.browserNotifs=true; persist('settings'); showToast('Browser notifications enabled — keep this tab open','forest','bell'); document.getElementById('firstPlantPrompt')?.classList.add('hidden'); }
+  if(perm==='granted'){ state.settings.browserNotifs=true; persist('settings'); showToast('Mobile notifications enabled — daily reminders scheduled','forest','bell'); document.getElementById('firstPlantPrompt')?.classList.add('hidden'); }
   else showToast('Notification permission was not granted','clay','bell-off');
 }
 // (2026-07-13) Guard btnEnableNotifs; element removed from HTML; prev: hard crash
@@ -3515,12 +3761,26 @@ function renderExpenses(){
   expList.innerHTML = '';
   state.expenses.slice().reverse().forEach(e=>{
     const row = document.createElement('div');
-    row.className = 'flex items-center justify-between py-2.5';
-    row.innerHTML = `<div class="min-w-0"><div class="text-[13px] font-medium text-ink truncate">${e.name}</div><div class="text-[11px] text-ink-soft">${e.category}</div></div>
-      <div class="flex items-center gap-2 flex-shrink-0"><span class="font-mono text-[13px] font-semibold">₱${fmtPeso(e.amount)}</span><button data-del-expense="${e.id}" class="text-ink-soft/60 hover:text-clay">${icon('x','w-3.5 h-3.5',14)}</button></div>`;
+    row.className = 'flex items-center justify-between py-2.5 pr-1';
+    row.innerHTML = `<div class="min-w-0 pr-2"><div class="text-[13px] font-medium text-ink truncate">${e.name}</div><div class="text-[11px] text-ink-soft">${e.category}</div></div>
+      <div class="flex items-center gap-2 flex-shrink-0"><span class="font-mono text-[13px] font-semibold">₱${fmtPeso(e.amount)}</span><button data-del-expense="${e.id}" class="text-ink-soft/60 hover:text-clay hover:bg-clay/10 p-1 rounded-lg transition-colors ml-1" title="Delete expense">${icon('x','w-3.5 h-3.5',14)}</button></div>`;
     expList.appendChild(row);
   });
-  expList.querySelectorAll('[data-del-expense]').forEach(btn=>btn.addEventListener('click', ()=>{ state.expenses=state.expenses.filter(e=>e.id!==btn.dataset.delExpense); persist('expenses'); renderExpenses(); }));
+// (2026-07-13) Spaced delete button & undo snackbar on delete; prev: instant del
+  expList.querySelectorAll('[data-del-expense]').forEach(btn=>btn.addEventListener('click', ()=>{
+    const targetId = btn.dataset.delExpense;
+    const targetIndex = state.expenses.findIndex(e=>e.id===targetId);
+    if(targetIndex === -1) return;
+    const deletedItem = state.expenses[targetIndex];
+    state.expenses = state.expenses.filter(e=>e.id!==targetId);
+    persist('expenses');
+    renderExpenses();
+    triggerUndoSnackbar(`Deleted "${deletedItem.name}"`, ()=>{
+      state.expenses.splice(targetIndex, 0, deletedItem);
+      persist('expenses');
+      renderExpenses();
+    });
+  }));
 
   const harvestList = document.getElementById('harvestList');
   const harvestEmpty = document.getElementById('harvestEmptyState');
@@ -3791,8 +4051,9 @@ function currentPageName(){ const visible=[...document.querySelectorAll('.page')
   }
 });
 
-document.getElementById('btnOverlayGoogleSignIn')?.addEventListener('click', ()=>cloudSync.signInWithGoogle());
-document.getElementById('btnOverlayOffline')?.addEventListener('click', ()=>cloudSync.continueOffline());
+// (2026-07-13) Safely invoke window.cloudSync methods on click; prev: bare cloudSync
+document.getElementById('btnOverlayGoogleSignIn')?.addEventListener('click', ()=>window.cloudSync?.signInWithGoogle());
+document.getElementById('btnOverlayOffline')?.addEventListener('click', ()=>window.cloudSync?.continueOffline());
 
 // (2026-07-13) Wire Reservoir modal button and form submit; prev: none
 document.getElementById('btnOpenReservoirModal')?.addEventListener('click', openReservoirModal);
@@ -3839,16 +4100,29 @@ function updateRotationPlanner(){
   document.getElementById(id)?.addEventListener('input', updateRotationPlanner);
 });
 
-/* ================= FIRST RENDER ================= */
-const savedNavPage = (function(){
-  try { return localStorage.getItem('ht_active_page'); } catch(e){ return null; }
+// (2026-07-13) Restore last active page or 5m timeout to home; prev: dashboard
+const INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000;
+const initialNavPage = (function(){
+  try {
+    const lastActive = Number(localStorage.getItem('ht_last_activity')) || 0;
+    const now = Date.now();
+    localStorage.setItem('ht_last_activity', String(now));
+    if(lastActive > 0 && (now - lastActive) > INACTIVITY_TIMEOUT_MS){
+      localStorage.setItem('ht_active_page', 'dashboard');
+      return 'dashboard';
+    }
+    const saved = localStorage.getItem('ht_active_page');
+    return (saved && document.getElementById('page-' + saved)) ? saved : 'dashboard';
+  } catch(e){
+    return 'dashboard';
+  }
 })();
-const initialNavPage = savedNavPage && document.getElementById('page-' + savedNavPage) ? savedNavPage : 'dashboard';
 showPage(initialNavPage, { instant: true });
 updateNutrients();
 updateRotationPlanner();
 maybeTriggerFirstPlantFlow();
-updateSyncStatus('offline');
+// (2026-07-13) Safe check for updateSyncStatus on startup; prev: direct call
+if (typeof updateSyncStatus === 'function') updateSyncStatus('offline');
 if (typeof bootAuth === 'function') {
   bootAuth().catch(err => console.log('Auth boot skipped:', err));
 }
@@ -3869,13 +4143,22 @@ function logActivityNotification(title, message, iconName){
   }
 }
 
-// (2026-07-13) Custom reminders manager; prev: none
+// (2026-07-13) Sync custom reminders to state.settings & DB; prev: local only
 function getCustomReminders(){
-  return store.get('custom_reminders', [
+  if(state.settings && Array.isArray(state.settings.customReminders)) {
+    return state.settings.customReminders;
+  }
+  const defaultList = [
     { id: 'cr_1', title: 'Check Reservoir pH & EC', time: '08:30', active: true },
     { id: 'cr_2', title: 'Refill Water Tank', time: '17:00', active: true }
-  ]);
+  ];
+  if(state.settings){
+    state.settings.customReminders = defaultList;
+    persist('settings');
+  }
+  return defaultList;
 }
+// (2026-07-13) Use .on class for custom reminder switches; prev: .active
 function renderCustomReminders(){
   const container = document.getElementById('customReminderList');
   if(!container) return;
@@ -3891,24 +4174,40 @@ function renderCustomReminders(){
         <div class="text-[11.5px] font-mono text-ink-soft">${r.time}</div>
       </div>
       <div class="flex items-center gap-2">
-        <div class="switch ${r.active?'active':''}" data-custom-rem-toggle="${r.id}" role="switch" aria-checked="${r.active}" tabindex="0"></div>
+        <div class="switch ${r.active?'on':''}" data-custom-rem-toggle="${r.id}" role="switch" aria-checked="${r.active}" tabindex="0"></div>
         <button data-custom-rem-del="${r.id}" class="text-clay hover:text-clay-dark p-1">${icon('trash-2','w-3.5 h-3.5',14)}</button>
       </div>
     </div>`).join('');
 
+  // (2026-07-13) Update dashboard tasks when custom reminders change; prev: none
+  function toggleRem(id){
+    const rems = getCustomReminders();
+    const r = rems.find(x=>x.id===id);
+    if(r){
+      r.active = !r.active;
+      state.settings.customReminders = rems;
+      persist('settings');
+      store.set('custom_reminders', rems);
+      renderCustomReminders();
+      if(typeof renderDashboard === 'function') renderDashboard();
+    }
+  }
+
   container.querySelectorAll('[data-custom-rem-toggle]').forEach(sw=>{
-    sw.addEventListener('click', ()=>{
-      const id = sw.dataset.customRemToggle;
-      const rems = getCustomReminders();
-      const r = rems.find(x=>x.id===id);
-      if(r){ r.active = !r.active; store.set('custom_reminders', rems); renderCustomReminders(); }
+    sw.addEventListener('click', ()=>toggleRem(sw.dataset.customRemToggle));
+    sw.addEventListener('keydown', (e)=>{
+      if(e.key==='Enter' || e.key===' '){ e.preventDefault(); toggleRem(sw.dataset.customRemToggle); }
     });
   });
   container.querySelectorAll('[data-custom-rem-del]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const id = btn.dataset.customRemDel;
       const rems = getCustomReminders().filter(x=>x.id!==id);
-      store.set('custom_reminders', rems); renderCustomReminders();
+      state.settings.customReminders = rems;
+      persist('settings');
+      store.set('custom_reminders', rems);
+      renderCustomReminders();
+      if(typeof renderDashboard === 'function') renderDashboard();
     });
   });
 }
@@ -3928,9 +4227,12 @@ document.getElementById('btnConfirmAddReminder')?.addEventListener('click', ()=>
   if(!title) { document.getElementById('addReminderTitle')?.focus(); return; }
   const rems = getCustomReminders();
   rems.push({ id: 'cr_' + Date.now(), title, time, active: true });
+  state.settings.customReminders = rems;
+  persist('settings');
   store.set('custom_reminders', rems);
   document.getElementById('addReminderModal')?.classList.add('hidden');
   renderCustomReminders();
+  if(typeof renderDashboard === 'function') renderDashboard();
 });
 renderCustomReminders();
 
@@ -3994,10 +4296,41 @@ function exportFinancialPDFReport(){
 }
 document.getElementById('btnExportFinancialPDF')?.addEventListener('click', exportFinancialPDFReport);
 
-// (2026-07-13) Add universal back button modal close & double-back exit; prev: none
+// (2026-07-13) Universal back redirects to home then double-back to exit; prev: partial
 let lastBackPressTime = 0;
 
-// (2026-07-13) Modal stack dismissal hierarchy for photo detail & zoom; prev: direct
+function checkInactivityTimeout(){
+  try {
+    const lastActive = Number(localStorage.getItem('ht_last_activity')) || 0;
+    const now = Date.now();
+    if(lastActive > 0 && (now - lastActive) > 5 * 60 * 1000){
+      localStorage.setItem('ht_active_page', 'dashboard');
+      showPage('dashboard', { instant: true });
+    }
+    localStorage.setItem('ht_last_activity', String(now));
+  } catch(e){}
+}
+
+let lastActivityRecord = 0;
+function recordUserActivity(){
+  const now = Date.now();
+  if(now - lastActivityRecord > 15000){
+    lastActivityRecord = now;
+    try { localStorage.setItem('ht_last_activity', String(now)); } catch(e){}
+  }
+}
+['click', 'touchstart', 'scroll', 'keydown'].forEach(evt=>{
+  window.addEventListener(evt, recordUserActivity, { passive: true });
+});
+
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState === 'visible'){
+    checkInactivityTimeout();
+  } else {
+    try { localStorage.setItem('ht_last_activity', String(Date.now())); } catch(e){}
+  }
+});
+
 function handleUniversalBack(){
   const openModals = Array.from(document.querySelectorAll('#fullscreenZoomModal, [role="dialog"]:not(.hidden):not(#authOverlay)'));
   if(openModals.length > 0){
@@ -4031,7 +4364,7 @@ function handleUniversalBack(){
   }
 
   const now = Date.now();
-  if(now - lastBackPressTime < 2000){
+  if(now - lastBackPressTime < 2500){
     const appPlugin = window.Capacitor?.Plugins?.App || (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform() ? window.Capacitor.Plugins.App : null);
     if(appPlugin?.exitApp){
       appPlugin.exitApp();
@@ -4040,7 +4373,7 @@ function handleUniversalBack(){
     }
   } else {
     lastBackPressTime = now;
-    showToast('Press back again to exit', 'clay', 'log-out');
+    showToast('Press back again to exit.', 'clay', 'log-out');
   }
   return true;
 }
@@ -4049,6 +4382,13 @@ function initBackButtonListener(){
   if(window.Capacitor?.Plugins?.App?.addListener){
     window.Capacitor.Plugins.App.addListener('backButton', ()=>{
       handleUniversalBack();
+    });
+    window.Capacitor.Plugins.App.addListener('appStateChange', (appState)=>{
+      if(appState.isActive){
+        checkInactivityTimeout();
+      } else {
+        try { localStorage.setItem('ht_last_activity', String(Date.now())); } catch(e){}
+      }
     });
   }
 }
@@ -4067,3 +4407,111 @@ window.addEventListener('popstate', ()=>{
     window.history.pushState({ page: 'active' }, '');
   } catch(e){}
 });
+
+// (2026-07-13) Fix scroll direction check & continuous SVG spin; prev: inline transform
+(function setupPullToRefresh(){
+  let startX = 0;
+  let startY = 0;
+  let pullDistance = 0;
+  let isPulling = false;
+  let isRefreshing = false;
+  let rafId = null;
+
+  const container = document.getElementById('pullToRefreshContainer');
+  const threshold = 55;
+
+  function updateTransform() {
+    if (!container) return;
+    if (isPulling && pullDistance > 0) {
+      const dampedY = 55 * Math.atan(pullDistance / 90);
+      const scale = Math.min(0.5 + (dampedY / threshold) * 0.5, 1.0);
+      const opacity = Math.min(dampedY / 18, 1.0);
+
+      container.style.transition = 'none';
+      container.style.opacity = String(opacity);
+      container.style.transform = `translateY(${dampedY}px) scale(${scale})`;
+    }
+  }
+
+  window.addEventListener('touchstart', (e) => {
+    if ((window.scrollY === 0 || document.documentElement.scrollTop === 0) && !isRefreshing && e.touches.length === 1) {
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      isPulling = true;
+      pullDistance = 0;
+    }
+  }, { passive: true });
+
+  window.addEventListener('touchmove', (e) => {
+    if (!isPulling || isRefreshing || (window.scrollY > 0 && document.documentElement.scrollTop > 0)) return;
+    const currentX = e.touches[0].clientX;
+    const currentY = e.touches[0].clientY;
+    const deltaX = currentX - startX;
+    const deltaY = currentY - startY;
+
+    if (Math.abs(deltaX) > Math.abs(deltaY) * 1.2) {
+      isPulling = false;
+      pullDistance = 0;
+      if (container) {
+        container.style.opacity = '0';
+        container.style.transform = 'translateY(-150px) scale(0.6)';
+      }
+      return;
+    }
+
+    if (deltaY > 0) {
+      pullDistance = deltaY;
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(updateTransform);
+    }
+  }, { passive: true });
+
+  window.addEventListener('touchend', async () => {
+    if (!isPulling || isRefreshing) return;
+    isPulling = false;
+    if (rafId) cancelAnimationFrame(rafId);
+
+    const dampedY = 55 * Math.atan(pullDistance / 90);
+    if (dampedY >= 38) {
+      isRefreshing = true;
+      if (container) {
+        container.style.transition = 'transform 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.25s ease-out';
+        container.style.opacity = '1';
+        container.style.transform = 'translateY(22px) scale(1)';
+      }
+
+      try {
+        if (typeof renderPage === 'function' && typeof currentPageName === 'function') {
+          renderPage(currentPageName());
+        }
+        if (typeof window.cloudSync !== 'undefined' && window.cloudSync.connected) {
+          await window.cloudSync.pushNow?.();
+        }
+        const skeleton = document.getElementById('dashboardSkeletonOverlay');
+        if (skeleton) {
+          skeleton.classList.remove('hidden');
+          setTimeout(() => skeleton.classList.add('hidden'), 750);
+        }
+      } catch (err) {
+        console.error('Pull to refresh failed:', err);
+      } finally {
+        setTimeout(() => {
+          if (container) {
+            container.style.transition = 'transform 0.3s ease-in, opacity 0.25s ease-in';
+            container.style.opacity = '0';
+            container.style.transform = 'translateY(-150px) scale(0.6)';
+          }
+          isRefreshing = false;
+          pullDistance = 0;
+        }, 750);
+      }
+    } else {
+      if (container) {
+        container.style.transition = 'transform 0.25s ease-out, opacity 0.2s ease-out';
+        container.style.opacity = '0';
+        container.style.transform = 'translateY(-150px) scale(0.6)';
+      }
+      pullDistance = 0;
+    }
+  });
+})();

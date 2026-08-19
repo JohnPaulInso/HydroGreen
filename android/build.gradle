@@ -3,8 +3,24 @@
 buildscript {
     
     repositories {
-        google()
-        mavenCentral()
+        google() {
+            content {
+                includeGroupByRegex "com\\.android.*"
+                includeGroupByRegex "com\\.google.*"
+                includeGroupByRegex "androidx.*"
+            }
+        }
+        mavenCentral() {
+            content {
+                includeGroupByRegex ".*"
+            }
+        }
+        maven {
+            url "https://jitpack.io"
+            content {
+                includeGroupByRegex "com\\.github.*"
+            }
+        }
     }
     dependencies {
         classpath 'com.android.tools.build:gradle:8.13.0'
@@ -19,8 +35,24 @@ apply from: "variables.gradle"
 
 allprojects {
     repositories {
-        google()
-        mavenCentral()
+        google() {
+            content {
+                includeGroupByRegex "com\\.android.*"
+                includeGroupByRegex "com\\.google.*"
+                includeGroupByRegex "androidx.*"
+            }
+        }
+        mavenCentral() {
+            content {
+                includeGroupByRegex ".*"
+            }
+        }
+        maven {
+            url "https://jitpack.io"
+            content {
+                includeGroupByRegex "com\\.github.*"
+            }
+        }
     }
 }
 

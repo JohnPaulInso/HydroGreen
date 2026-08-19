@@ -8,7 +8,9 @@
 const KEYS = {
   rows:'ht_rows', pockets:'ht_pockets', trays:'ht_trays', expenses:'ht_expenses',
   harvests:'ht_harvests', settings:'ht_settings', completed:'ht_completed',
-  alertLog:'ht_alertlog', meta:'ht_meta', towers:'ht_towers', activeTower:'ht_active_tower', reservoir:'ht_reservoir'
+  alertLog:'ht_alertlog', meta:'ht_meta', towers:'ht_towers', activeTower:'ht_active_tower', reservoir:'ht_reservoir',
+  // (2026-07-13) Add photoLog key for tower-wide growth photo history; prev: none
+  photoLog:'ht_photo_log'
 };
 
 // (2026-07-13) Expand CROP_PRESETS with popular hydroponic seeds; prev: 8 presets
@@ -58,10 +60,15 @@ const DEFAULT_EXPENSES = [
   { id:'e9', name:'SNAP Nutrient Solution A & B', amount:420, category:'Consumables' }
 ];
 
+// (2026-07-13) Add customReminders to DEFAULT_SETTINGS; prev: missing field
 const DEFAULT_SETTINGS = {
   sunReminder:false, heatReminder:false, nightReminder:false,
   sunTime:'07:00', heatTime:'11:00', nightTime:'18:00',
-  rainAlerts:false, windAlerts:false, browserNotifs:false, location:'Bogo City'
+  rainAlerts:false, windAlerts:false, browserNotifs:false, location:'Bogo City',
+  customReminders: [
+    { id: 'cr_1', title: 'Check Reservoir pH & EC', time: '08:30', active: true },
+    { id: 'cr_2', title: 'Refill Water Tank', time: '17:00', active: true }
+  ]
 };
 
 /* ---------------- storage module ---------------- */
@@ -113,15 +120,8 @@ const store = {
       this.set(KEYS.trays, []);
     }
     
-    // Keep real expenses as initial equipment cost
-    if(!localStorage.getItem(KEYS.expenses)) {
-      const initialDate = todayISO();
-      const realExpenses = DEFAULT_EXPENSES.map(exp => ({
-        ...exp,
-        date: initialDate
-      }));
-      this.set(KEYS.expenses, realExpenses);
-    }
+    // (2026-07-13) Default expenses to empty array; prev: seeded 4320 default costs
+    if(!localStorage.getItem(KEYS.expenses)) this.set(KEYS.expenses, []);
     
     if(!localStorage.getItem(KEYS.harvests)) this.set(KEYS.harvests, []);
     if(!localStorage.getItem(KEYS.settings)) this.set(KEYS.settings, DEFAULT_SETTINGS);
@@ -135,14 +135,98 @@ const store = {
 
 /* ---------------- helpers ---------------- */
 function uid(){ return Math.random().toString(36).slice(2,10); }
-function todayISO(){ const d=new Date(); d.setHours(0,0,0,0); return d.toISOString().slice(0,10); }
-function daysAgoISO(n){ const d=new Date(); d.setDate(d.getDate()-n); d.setHours(0,0,0,0); return d.toISOString().slice(0,10); }
-function addDays(iso,n){ const d=new Date(iso+'T00:00:00'); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); }
-function dayOfCycle(dateISO){ const start=new Date(dateISO+'T00:00:00'); const now=new Date(); now.setHours(0,0,0,0); return Math.floor((now-start)/86400000)+1; }
+// (2026-07-13) Fix timezone & day-offset in plant age math; prev: 2-day skew
+function toLocalISO(d){
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function todayISO(){ return toLocalISO(new Date()); }
+function daysAgoISO(n){
+  const d = new Date();
+  const offset = Math.max(0, n > 0 ? (n - 1) : 0);
+  d.setDate(d.getDate() - offset);
+  return toLocalISO(d);
+}
+function addDays(iso,n){
+  const parts = (iso||'').split('-').map(Number);
+  const d = (parts.length===3) ? new Date(parts[0], parts[1]-1, parts[2]) : new Date();
+  d.setDate(d.getDate()+n);
+  return toLocalISO(d);
+}
+function dayOfCycle(dateISO){
+  if(!dateISO) return 1;
+  const parts = dateISO.split('-').map(Number);
+  if(parts.length!==3) return 1;
+  const start = new Date(parts[0], parts[1]-1, parts[2]);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const diffDays = Math.round((today - start) / 86400000);
+  return Math.max(1, diffDays + 1);
+}
 function stageForDay(day){ for(const s of STAGES){ if(day>=s.range[0] && day<=s.range[1]) return s; } return day<1?STAGES[0]:STAGES[STAGES.length-1]; }
 function stageIndex(key){ return STAGES.findIndex(s=>s.key===key); }
 function fmtPeso(n){ return Math.round(n).toLocaleString('en-PH'); }
-function fmtDate(iso){ if(!iso) return '—'; return new Date(iso+'T00:00:00').toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'}); }
+function fmtDate(iso){
+  if(!iso) return '—';
+  const parts = iso.split('-').map(Number);
+  if(parts.length===3) return new Date(parts[0], parts[1]-1, parts[2]).toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'});
+  return iso;
+}
+
+/* ---- Image compression for Firebase (fixes "invalid nested entity" error) ---- */
+function compressImage(file, maxWidth = 1200, quality = 0.8) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+
+        // Scale down if larger than maxWidth
+        if (width > maxWidth) {
+          height = (height * maxWidth) / width;
+          width = maxWidth;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+
+        // Convert to JPEG with quality compression
+        canvas.toBlob(
+          (blob) => {
+            if(!blob){ reject(new Error('Compression failed')); return; }
+            const compressedReader = new FileReader();
+            compressedReader.onload = () => resolve(compressedReader.result);
+            compressedReader.onerror = reject;
+            compressedReader.readAsDataURL(blob);
+          },
+          'image/jpeg',
+          quality
+        );
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+// Calculate file size from base64 data URL
+function getFileSizeFromDataUrl(dataUrl) {
+  if(!dataUrl) return '0 KB';
+  // Remove data URL prefix to get base64 string
+  const base64 = dataUrl.split(',')[1] || '';
+  // Calculate actual size (base64 is ~4/3 of original)
+  const sizeBytes = (base64.length * 3) / 4;
+  
+  if (sizeBytes < 1024) return `${sizeBytes.toFixed(0)} B`;
+  if (sizeBytes < 1024 * 1024) return `${(sizeBytes / 1024).toFixed(1)} KB`;
+  return `${(sizeBytes / (1024 * 1024)).toFixed(2)} MB`;
+}
 
 function getPocketState(p){
   if(!p.variety) return { status:'empty', stage:null, day:0 };
@@ -166,9 +250,11 @@ function nextTransitionInfo(day, stageKeyOrObj){
 
 /* ================= INIT ================= */
 store.init();
-let state = {
+// (2026-07-13) Bind state globally on window; prev: block-scoped let state
+window.state = state = {
   towers: store.get(KEYS.towers, [{ id:'t1', name:'Main Tower' }]),
-  activeTowerId: localStorage.getItem(KEYS.activeTower) || 't1',
+  // (2026-07-13) Restore activeTowerId from storage; prev: default to t1
+  activeTowerId: store.get(KEYS.activeTower, 't1'),
   rows: store.get(KEYS.rows, []),
   pockets: store.get(KEYS.pockets, []),
   trays: store.get(KEYS.trays, []),
@@ -178,10 +264,54 @@ let state = {
   completed: store.get(KEYS.completed, {}),
   alertLog: store.get(KEYS.alertLog, []),
   meta: store.get(KEYS.meta, { firstPlantPrompted:false }),
+  // (2026-07-13) Tower-wide photo history log; prev: per-plant p.photo only
+  photoLog: store.get(KEYS.photoLog, []),
   reservoir: store.get(KEYS.reservoir, { ph:6.0, targetPh:6.0, ec:1.6, targetEc:1.8, tempC:22, waterPct:85, capacityLiters:30, history:[] })
 };
 // Ensure all rows have a towerId assigned
 state.rows.forEach(r => { if(!r.towerId) r.towerId = 't1'; });
+// (2026-07-13) Preserve active tower from storage; prev: reset to t1
+const savedTowerId = store.get(KEYS.activeTower);
+if(savedTowerId && state.towers.some(t => t.id === savedTowerId)){ state.activeTowerId = savedTowerId; }
+else { state.activeTowerId = (state.towers.find(t=>t.id==='t1') || state.towers[0])?.id || 't1'; }
+localStorage.setItem(KEYS.activeTower, state.activeTowerId);
+
+// (2026-07-13) Clean account reset helper; prev: retained previous user state
+function buildCleanDefaultState(){
+  const rows = Array.from({length:8}, (_,i)=>({ id:'r'+(i+1), towerId:'t1', potCount:3 }));
+  const pockets = [];
+  let n=1;
+  rows.forEach(row=>{ for(let i=0;i<3;i++) pockets.push({ id:String(n++), rowId:row.id, variety:null, datePlanted:null, override:null }); });
+  return {
+    towers: [{ id:'t1', name:'Main Tower' }],
+    activeTowerId: 't1',
+    rows: rows,
+    pockets: pockets,
+    trays: [],
+    expenses: [],
+    harvests: [],
+    settings: JSON.parse(JSON.stringify(DEFAULT_SETTINGS)),
+    completed: {},
+    alertLog: [],
+    meta: { firstPlantPrompted:false },
+    photoLog: [],
+    reservoir: { ph:6.0, targetPh:6.0, ec:1.6, targetEc:1.8, tempC:22, waterPct:85, capacityLiters:30, history:[] }
+  };
+}
+window.buildCleanDefaultState = buildCleanDefaultState;
+
+function resetStateToDefaults(){
+  const clean = buildCleanDefaultState();
+  Object.keys(clean).forEach(k => {
+    state[k] = clean[k];
+    if(KEYS[k]) store.set(KEYS[k], clean[k]);
+  });
+  localStorage.setItem(KEYS.activeTower, 't1');
+  if(typeof renderPage === 'function') renderPage(typeof currentPageName === 'function' ? currentPageName() : 'dashboard');
+  if(typeof renderReminders === 'function') renderReminders();
+  if(typeof renderCustomReminders === 'function') renderCustomReminders();
+}
+window.resetStateToDefaults = resetStateToDefaults;
 
 function getActiveTower(){
   let t = state.towers.find(x=>x.id===state.activeTowerId);
@@ -198,30 +328,34 @@ function getActiveTower(){
   }
   return t;
 }
+// (2026-07-13) Re-schedule push notifications when settings persist; prev: none
 function persist(part){
   if(state[part]===undefined) return;
   store.set(KEYS[part], state[part]);
   if(typeof cloudSync!=='undefined' && cloudSync.connected && !cloudSync.applyingRemote) cloudSync.pushDebounced();
+  if(part === 'settings' && typeof notificationManager !== 'undefined' && notificationManager.scheduleAllReminders){
+    notificationManager.scheduleAllReminders();
+  }
 }
-// (2026-07-13) High-contrast dark undo snackbar with explicit inline styles; prev: white background conflict
+// (2026-07-13) Auto-dismiss undo snackbar cleanly; prev: stayed stuck in DOM
 let activeUndoTimer = null;
 let activeUndoInterval = null;
 function triggerUndoSnackbar(message, restoreFn){
   if(activeUndoTimer){ clearTimeout(activeUndoTimer); activeUndoTimer = null; }
   if(activeUndoInterval){ clearInterval(activeUndoInterval); activeUndoInterval = null; }
-  const existing = document.getElementById('undoSnackbar');
-  if(existing) existing.remove();
+  document.querySelectorAll('#undoSnackbar').forEach(s => s.remove());
 
   const snackbar = document.createElement('div');
   snackbar.id = 'undoSnackbar';
-  snackbar.style.cssText = 'position:fixed; bottom:max(5.5rem, calc(4.5rem + env(safe-area-inset-bottom))); left:50%; transform:translateX(-50%); z-index:99999; background-color:#14261C !important; color:#FFFFFF !important; padding:12px 18px; border-radius:18px; box-shadow:0 10px 25px rgba(0,0,0,0.35); display:flex; align-items:center; justify-content:space-between; gap:16px; font-size:13.5px; font-weight:600; border:2px solid #2F9E5B; max-width:92vw; min-width:300px;';
+  // (2026-07-13) Set snackbar z-index under modals; prev: z-index:99999
+  snackbar.style.cssText = 'position:fixed; bottom:max(5.5rem, calc(4.5rem + env(safe-area-inset-bottom))); left:50%; transform:translateX(-50%); z-index:15000; background-color:#FFFFFF !important; color:#0F172A !important; padding:10px 14px; border-radius:16px; box-shadow:0 10px 25px rgba(0,0,0,0.18); display:flex; align-items:center; justify-content:space-between; gap:12px; font-size:12px; font-weight:600; border:1.5px solid #CBD5E1; max-width:88vw; min-width:280px;';
   
   let seconds = 5;
   snackbar.innerHTML = `
-    <span style="color:#FFFFFF !important; font-size:13.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${message}</span>
-    <button id="btnUndoAction" type="button" style="background-color:#2F9E5B !important; color:#FFFFFF !important; font-size:12.5px; font-weight:700; padding:7px 14px; border-radius:12px; border:1px solid rgba(255,255,255,0.3); cursor:pointer; display:flex; align-items:center; gap:8px; flex-shrink:0; box-shadow:0 2px 6px rgba(0,0,0,0.2);">
+    <span style="color:#0F172A !important; font-size:12px; font-weight:600; word-break:break-word; white-space:normal; line-height:1.35; flex:1; min-width:0;">${message}</span>
+    <button id="btnUndoAction" type="button" style="background-color:#166534 !important; color:#FFFFFF !important; font-size:11.5px; font-weight:700; padding:6px 12px; border-radius:10px; border:none; cursor:pointer; display:flex; align-items:center; gap:6px; flex-shrink:0; box-shadow:0 2px 6px rgba(0,0,0,0.12);">
       <span style="color:#FFFFFF !important;">Undo</span>
-      <span id="undoCountdown" style="background-color:rgba(255,255,255,0.25) !important; color:#FFFFFF !important; font-family:monospace; font-weight:700; font-size:11px; padding:2px 6px; border-radius:6px;">5s</span>
+      <span id="undoCountdown" style="background-color:rgba(255,255,255,0.3) !important; color:#FFFFFF !important; font-family:monospace; font-weight:700; font-size:10.5px; padding:1.5px 5px; border-radius:5px;">5s</span>
     </button>
   `;
 
@@ -230,10 +364,14 @@ function triggerUndoSnackbar(message, restoreFn){
   const countdownEl = snackbar.querySelector('#undoCountdown');
   const btnUndo = snackbar.querySelector('#btnUndoAction');
 
-  btnUndo.addEventListener('click', ()=>{
+  function removeSnackbar(){
     if(activeUndoTimer){ clearTimeout(activeUndoTimer); activeUndoTimer = null; }
     if(activeUndoInterval){ clearInterval(activeUndoInterval); activeUndoInterval = null; }
     snackbar.remove();
+  }
+
+  btnUndo.addEventListener('click', ()=>{
+    removeSnackbar();
     restoreFn();
     showToast('Action undone', 'forest', 'check');
   });
@@ -242,17 +380,13 @@ function triggerUndoSnackbar(message, restoreFn){
     seconds--;
     if(countdownEl) countdownEl.textContent = `${seconds}s`;
     if(seconds <= 0){
-      clearInterval(activeUndoInterval);
-      activeUndoInterval = null;
-      if(snackbar.parentElement) snackbar.remove();
+      removeSnackbar();
     }
   }, 1000);
 
   activeUndoTimer = setTimeout(()=>{
-    if(activeUndoInterval){ clearInterval(activeUndoInterval); activeUndoInterval = null; }
-    if(snackbar.parentElement) snackbar.remove();
-    activeUndoTimer = null;
-  }, 5200);
+    removeSnackbar();
+  }, 5000);
 }
 function hasAnyPlant(){ return state.pockets.some(p=>p.variety) || state.trays.length>0; }
 
@@ -278,9 +412,29 @@ function showFirstPlantBanner(){
 }
 
 /* ================= NAVIGATION ================= */
+// (2026-07-13) Fast subtle page fade-out fade-in transition; prev: instant toggle
 function showPage(name, opts){
-  document.querySelectorAll('.page').forEach(p=>p.classList.add('hidden'));
-  const pageEl = document.getElementById('page-'+name);
+  const activePage = document.querySelector('.page:not(.hidden)');
+  const targetPage = document.getElementById('page-'+name);
+  if(!targetPage) return;
+
+  if(activePage && activePage !== targetPage && !opts?.instant){
+    activePage.classList.add('page-exit');
+    setTimeout(()=>{
+      activePage.classList.remove('page-exit');
+      activePage.classList.add('hidden');
+      performPageSwitch(name, targetPage, opts);
+    }, 60);
+  } else {
+    performPageSwitch(name, targetPage, opts);
+  }
+}
+
+// (2026-07-13) Dismiss undo snackbar on tab navigation; prev: remained on screen
+function performPageSwitch(name, pageEl, opts){
+  document.querySelectorAll('#undoSnackbar').forEach(s=>s.remove());
+  try { localStorage.setItem('ht_active_page', name); } catch(e){}
+  document.querySelectorAll('.page').forEach(p=>{ if(p!==pageEl) p.classList.add('hidden'); });
   pageEl.classList.remove('hidden');
   document.querySelectorAll('.nav-btn').forEach(b=>{
     const active = b.dataset.page===name;
@@ -294,8 +448,6 @@ function showPage(name, opts){
   });
   renderPage(name);
   window.scrollTo({top:0,behavior:'instant'});
-  // Move focus to the new page's heading for screen-reader/keyboard users,
-  // but skip it on the very first automatic load so focus doesn't jump on landing.
   if(opts?.fromNav){
     const heading = pageEl.querySelector('h1');
     if(heading){ heading.setAttribute('tabindex','-1'); heading.focus({preventScroll:true}); }
@@ -318,22 +470,41 @@ function renderPage(name){
   if(name==='tools') renderTools();
 }
 
-/* ================= TOASTS ================= */
+// (2026-07-13) Define MAX_TOASTS constant for showToast; prev: undefined variable
 const MAX_TOASTS = 3;
-function showToast(msg, tone='forest', iconName='info'){
+
+function showToast(msg, tone='forest', iconName='info', opts){
   const wrap = document.getElementById('toastContainer');
+  if(!wrap) return;
   announce(msg.replace(/<[^>]+>/g,''));
-  // Remove oldest toast if we've hit the limit
   const existingToasts = wrap.querySelectorAll('.toast');
   if(existingToasts.length >= MAX_TOASTS){
     existingToasts[0].remove();
   }
   const el = document.createElement('div');
   const bg = { forest:'bg-forest', clay:'bg-clay', gold:'bg-gold' }[tone] || 'bg-forest';
-  el.className = `toast ${bg} text-white text-[13px] font-medium px-4 py-3 rounded-xl shadow-lg flex items-center gap-2 max-w-sm pointer-events-auto`;
-  el.innerHTML = `${icon(iconName,'w-4 h-4 flex-shrink-0',16)}<span>${msg}</span>`;
+  el.className = `toast ${bg} text-white text-[13px] font-medium px-4 py-3 rounded-xl shadow-lg flex items-center justify-between gap-3 max-w-sm pointer-events-auto`;
+  
+  let actionHtml = '';
+  if(opts && opts.actionLabel){
+    actionHtml = `<button id="toastActionBtn" type="button" class="ml-2 bg-white/20 hover:bg-white/35 active:scale-95 text-white font-semibold text-[11.5px] px-2.5 py-1 rounded-lg transition-all underline flex-shrink-0">${opts.actionLabel}</button>`;
+  }
+
+  el.innerHTML = `<div class="flex items-center gap-2 min-w-0">${icon(iconName,'w-4 h-4 flex-shrink-0',16)}<span class="truncate">${msg}</span></div>${actionHtml}`;
   wrap.appendChild(el);
-  setTimeout(()=>{ el.style.opacity='0'; el.style.transform='translateX(16px)'; el.style.transition='.25s'; setTimeout(()=>el.remove(),260); }, 3800);
+
+  if(opts && opts.onAction){
+    const btn = el.querySelector('#toastActionBtn');
+    if(btn){
+      btn.onclick = (ev) => {
+        ev.stopPropagation();
+        el.remove();
+        opts.onAction();
+      };
+    }
+  }
+
+  setTimeout(()=>{ el.style.opacity='0'; el.style.transform='translateX(16px)'; el.style.transition='.25s'; setTimeout(()=>el.remove(),260); }, 4500);
 }
 
 /* ================= CONFIRMATION MODAL ================= */
@@ -379,11 +550,24 @@ function towerNameForRow(row){
 function locationLabel(row){
   return state.towers.length>1 ? `${towerNameForRow(row)} · ${rowLabel(row)}` : rowLabel(row);
 }
+// (2026-07-13) Include active custom reminders in Today tasks; prev: none
 function computeTasks(){
   const tasks = [];
   if(state.settings.sunReminder) tasks.push({ id:'sun-morning', time:formatTimeLabel(state.settings.sunTime), text:'Put seedling trays in direct morning sun', iconName:'sun' });
   if(state.settings.heatReminder) tasks.push({ id:'heat-midday', time:formatTimeLabel(state.settings.heatTime), text:'Move trays to shade — scorching midday heat', iconName:'thermometer' });
   if(state.settings.nightReminder) tasks.push({ id:'dark-night', time:formatTimeLabel(state.settings.nightTime), text:'Turn off porch lights — plants need full darkness', iconName:'moon' in ICONS ? 'moon':'bell' });
+
+  const customReminders = (state.settings && Array.isArray(state.settings.customReminders)) ? state.settings.customReminders : (typeof getCustomReminders === 'function' ? getCustomReminders() : []);
+  customReminders.forEach(r=>{
+    if(r.active){
+      tasks.push({
+        id: 'cust-' + r.id,
+        time: formatTimeLabel(r.time),
+        text: r.title,
+        iconName: 'bell'
+      });
+    }
+  });
 
   state.trays.forEach(t=>{
     const day = dayOfCycle(t.startDate);
@@ -420,7 +604,9 @@ function upcomingTransitions(limit){
 }
 
 /* ================= DASHBOARD ================= */
+// (2026-07-13) Dismiss skeleton overlay on dashboard render; prev: stuck visible
 function renderDashboard(){
+  document.getElementById('dashboardSkeletonOverlay')?.classList.add('hidden');
   document.getElementById('dateToday').textContent = new Date().toLocaleDateString('en-PH',{weekday:'long', month:'long', day:'numeric', year:'numeric'});
 
   const activePlants = state.pockets.filter(p=>p.variety).length;
@@ -438,6 +624,23 @@ function renderDashboard(){
   document.getElementById('statSeedlings').textContent = seedlingCount;
   document.getElementById('statSpent').textContent = fmtPeso(totalSpent);
   document.getElementById('statROI').textContent = roi.toFixed(1);
+
+  // (2026-07-13) Show rain warning banner on dashboard when rain prob > 50%; prev: none
+  const rainBanner = document.getElementById('dashboardWeatherRainBanner');
+  if(rainBanner){
+    const lw = (typeof weatherService !== 'undefined') ? weatherService.lastWeather : null;
+    const precipProb = lw?.daily?.precipitationProbMax?.[0] || 0;
+    const isRainy = (state.settings?.rainAlert !== false) && (precipProb > 50 || lw?.current?.precipitation > 0);
+    if(isRainy && !sessionStorage.getItem('dismiss_rain_banner')){
+      rainBanner.classList.remove('hidden');
+      document.getElementById('btnDismissRainBanner')?.addEventListener('click', ()=>{
+        sessionStorage.setItem('dismiss_rain_banner', '1');
+        rainBanner.classList.add('hidden');
+      });
+    } else {
+      rainBanner.classList.add('hidden');
+    }
+  }
 
   const tasks = computeTasks();
   const today = todayISO();
@@ -497,6 +700,7 @@ function renderDashboard(){
   document.getElementById('firstPlantPrompt')?.classList.toggle('hidden', state.meta.firstPlantPrompted!==true || state.settings.browserNotifs);
 }
 
+// (2026-07-13) Show stage modal on Growth Gallery click; prev: STAGE_DESCRIPTIONS error
 function renderGrowthGallery(containerId){
   const gallery = document.getElementById(containerId);
   if(!gallery) return;
@@ -505,11 +709,46 @@ function renderGrowthGallery(containerId){
     const key = meta.key;
     const card = document.createElement('button');
     card.type = 'button';
-    card.className = 'flex flex-col items-center text-center bg-cream hover:bg-mint rounded-xl p-2 transition-colors';
-    card.innerHTML = `${plantIcon(key, 40)}<span class="text-[10px] font-semibold text-ink-soft mt-1 leading-tight">${meta.label.split(' ')[0]}</span>`;
-    card.addEventListener('click', ()=>showToast(`<strong>${meta.label}</strong> (Day ${meta.range[0]}${meta.range[1]>900?'+':'–'+meta.range[1]}) — ${STAGE_DESCRIPTIONS[key]}`, 'forest', 'info'));
+    // (2026-07-13) Center content vertically inside stage cards; prev: justify-between
+    card.className = 'flex flex-col items-center justify-center text-center bg-cream hover:bg-mint/80 rounded-xl p-3 sm:p-3.5 transition-all border border-transparent hover:border-leaf/30 shadow-xs cursor-pointer';
+    const dayText = meta.range[1]>900 ? `Day ${meta.range[0]}+` : `Day ${meta.range[0]}-${meta.range[1]}`;
+    card.innerHTML = `${plantIcon(key, 36)}<div class="mt-1.5"><div class="text-[10.5px] font-semibold text-ink leading-tight">${meta.label.split(' ')[0]}</div><div style="font-size:7.5px !important; line-height:1 !important; font-weight:600; color:#64748B !important; margin-top:2px;">${dayText}</div></div>`;
+    card.addEventListener('click', ()=>openStageDetailModal(meta));
     gallery.appendChild(card);
   });
+}
+
+function openStageDetailModal(meta){
+  let existing = document.getElementById('stageDetailModal');
+  if(existing) existing.remove();
+  const dayStr = meta.range[1]>900 ? `Day ${meta.range[0]}+` : `Day ${meta.range[0]} – ${meta.range[1]}`;
+  const modal = document.createElement('div');
+  modal.id = 'stageDetailModal';
+  modal.setAttribute('role','dialog');
+  modal.setAttribute('aria-modal','true');
+  modal.className = 'fixed inset-0 z-[75] modal-backdrop flex items-end md:items-center justify-center p-0 md:p-4';
+  modal.innerHTML = `
+    <div class="modal-panel bg-white w-full md:max-w-sm rounded-t-3xl md:rounded-3xl p-5 md:p-6 shadow-2xl">
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-3">
+          <div class="p-2.5 rounded-xl bg-mint/50 border border-leaf/30">${plantIcon(meta.key, 40)}</div>
+          <div>
+            <h3 class="font-display font-bold text-[17px] text-forest leading-tight">${meta.label}</h3>
+            <span class="text-[11px] font-semibold font-mono text-forest bg-mint px-2.5 py-0.5 rounded-full inline-block mt-0.5">${dayStr}</span>
+          </div>
+        </div>
+        <button id="stageDetailClose" class="w-8 h-8 rounded-full bg-cream hover:bg-cream-dark flex items-center justify-center text-ink-soft font-bold text-[14px]">✕</button>
+      </div>
+      <div class="bg-cream/60 rounded-2xl p-4 border border-line/60 mb-4">
+        <div class="text-[11px] font-semibold text-ink-soft uppercase tracking-wider mb-1">Stage Care & Instructions</div>
+        <p class="text-[13px] text-ink font-medium leading-relaxed">${meta.note}</p>
+      </div>
+      <button id="stageDetailDone" class="w-full bg-forest text-white font-semibold text-[13.5px] py-2.5 rounded-xl shadow-sm">Got It</button>
+    </div>`;
+  document.body.appendChild(modal);
+  document.getElementById('stageDetailClose').onclick = ()=>modal.remove();
+  document.getElementById('stageDetailDone').onclick = ()=>modal.remove();
+  modal.addEventListener('click', ev=>{ if(ev.target===modal) modal.remove(); });
 }
 
 /* ================= TOWER (rows x columns) ================= */
@@ -543,15 +782,20 @@ function pocketAriaLabel(id){
   const {stage, day} = getPocketState(p);
   return `Pocket ${id}, ${p.variety}, ${stage.label}, day ${day}`;
 }
-// (2026-07-13) Fix pocket hit area with SVG fill-opacity; prev: fill="transparent"
+// (2026-07-13) Render health status outline rings on visualizer SVG pots; prev: static stroke
 function potCup(id, ax, ay, nx, ny, status, stageKey){
   const ring = `<circle class="pocket-select-ring" cx="${ax}" cy="${ay+9}" r="19" fill="none" stroke="#E8A33D" stroke-width="3.5" opacity="0"/>`;
   const iconR = 12;
   const hitCircle = `<circle cx="${ax}" cy="${ay+9}" r="24" fill="#000000" fill-opacity="0"/>`;
+  const pData = state.pockets.find(p=>String(p.id)===String(id));
+  const health = pData ? (pData.health || 'healthy') : 'healthy';
+  const isOccupied = pData && pData.variety;
+  const strokeColor = !isOccupied ? '#E3E9E3' : (health === 'unhealthy' ? '#F59E0B' : (health === 'dead' ? '#EF4444' : '#22C55E'));
+  const strokeW = isOccupied ? '2.5' : '1.5';
   return `<g class="tower-pocket" data-pocket-id="${id}" data-status="${status}" tabindex="0" role="button" aria-label="${pocketAriaLabel(id)}">${hitCircle}
     <line x1="${nx}" y1="${ny}" x2="${ax}" y2="${ay+8}" stroke="#C7D1CA" stroke-width="5" stroke-linecap="round"/>
     <path d="M${ax-15} ${ay+8} Q${ax-16} ${ay+24} ${ax} ${ay+26} Q${ax+16} ${ay+24} ${ax+15} ${ay+8} Z" fill="url(#pipeGrad)" stroke="#C2CCC5" stroke-width="1.5"/>
-    <circle cx="${ax}" cy="${ay+9}" r="${iconR+2}" fill="#FFFFFF" stroke="#E3E9E3" stroke-width="1"/>
+    <circle cx="${ax}" cy="${ay+9}" r="${iconR+2}" fill="#FFFFFF" stroke="${strokeColor}" stroke-width="${strokeW}"/>
     <g transform="translate(${ax-iconR},${ay+9-iconR}) scale(${(iconR*2)/100})">${plantIconInner(stageKey)}</g>
     ${ring}
   </g>`;
@@ -612,9 +856,14 @@ function channelPot(id, x, channelTopY, status, stageKey){
   const r = 15, iconR = 12;
   const ring = `<circle class="pocket-select-ring" cx="${x}" cy="${channelTopY}" r="${r+5}" fill="none" stroke="#E8A33D" stroke-width="3.5" opacity="0"/>`;
   const hitCircle = `<circle cx="${x}" cy="${channelTopY}" r="${r+8}" fill="#000000" fill-opacity="0"/>`;
+  const pData = state.pockets.find(p=>String(p.id)===String(id));
+  const health = pData ? (pData.health || 'healthy') : 'healthy';
+  const isOccupied = pData && pData.variety;
+  const strokeColor = !isOccupied ? '#C2CCC5' : (health === 'unhealthy' ? '#F59E0B' : (health === 'dead' ? '#EF4444' : '#22C55E'));
+  const strokeW = isOccupied ? '2.5' : '1.5';
   return `<g class="tower-pocket" data-pocket-id="${id}" data-status="${status}" tabindex="0" role="button" aria-label="${pocketAriaLabel(id)}">${hitCircle}
     <ellipse cx="${x}" cy="${channelTopY+3}" rx="${r+2}" ry="${(r+2)*0.55}" fill="#00000014"/>
-    <circle cx="${x}" cy="${channelTopY}" r="${r}" fill="#FFFFFF" stroke="#C2CCC5" stroke-width="1.5"/>
+    <circle cx="${x}" cy="${channelTopY}" r="${r}" fill="#FFFFFF" stroke="${strokeColor}" stroke-width="${strokeW}"/>
     <circle cx="${x}" cy="${channelTopY}" r="${iconR}" fill="#FBFCFA"/>
     <g transform="translate(${x-iconR+1},${channelTopY-iconR+1}) scale(${(iconR*2-2)/100})">${plantIconInner(stageKey)}</g>
     ${ring}
@@ -690,7 +939,8 @@ function buildHorizontalTowerSVG(filterVariety, targetRows){
 
 /* ---- Multi-select via tap / long-press + drag (mouse & touch, via Pointer Events) ---- */
 const selectionState = { active:false, ids:new Set() };
-let lp = { timer:null, dragging:false, fired:false, startX:0, startY:0, activeId:null };
+// (2026-07-13) Add mode to lp state for tower pocket drag select/unselect; prev: select only
+let lp = { timer:null, dragging:false, fired:false, startX:0, startY:0, activeId:null, mode:'select' };
 const LONG_PRESS_MS = 380, MOVE_CANCEL_PX = 12;
 
 // (2026-07-13) Consolidate tap modal opening to click event; prev: duplicate pointerup
@@ -707,27 +957,36 @@ function initTowerInteraction(){
     if(selectionState.active) toggleSelect(id, !selectionState.ids.has(id));
     else openPocketModal(id);
   });
+  // (2026-07-13) Determine drag mode select/unselect based on initial pocket state; prev: select only
   el.addEventListener('pointerdown', (e)=>{
     const pocketEl = e.target.closest('[data-pocket-id]');
     if(!pocketEl) return;
     lp.activeId = Number(pocketEl.dataset.pocketId);
+    const isAlreadySel = selectionState.ids.has(lp.activeId);
+    lp.mode = isAlreadySel ? 'unselect' : 'select';
     lp.startX=e.clientX; lp.startY=e.clientY; lp.fired=false; lp.dragging=false;
     lp.timer = setTimeout(()=>{
       lp.fired = true; lp.dragging = true;
       selectionState.active = true;
-      toggleSelect(lp.activeId, true);
+      toggleSelect(lp.activeId, lp.mode === 'select');
       try{ el.setPointerCapture(e.pointerId); }catch(err){}
       if(navigator.vibrate) navigator.vibrate(12);
     }, LONG_PRESS_MS);
   });
+  // (2026-07-13) Prevent touch scroll on drag select; prev: allow touch pan
+  el.addEventListener('touchmove', (e)=>{
+    if(lp.dragging || lp.fired){ if(e.cancelable) e.preventDefault(); }
+  }, { passive: false });
+  // (2026-07-13) Apply lp.mode select or unselect during tower drag; prev: select only
   el.addEventListener('pointermove', (e)=>{
     if(lp.timer && !lp.fired){
       if(Math.hypot(e.clientX-lp.startX, e.clientY-lp.startY) > MOVE_CANCEL_PX){ clearTimeout(lp.timer); lp.timer=null; }
     }
     if(lp.dragging){
+      if(e.cancelable) e.preventDefault();
       const under = document.elementFromPoint(e.clientX, e.clientY);
       const pocketEl = under && under.closest && under.closest('[data-pocket-id]');
-      if(pocketEl) toggleSelect(Number(pocketEl.dataset.pocketId), true);
+      if(pocketEl) toggleSelect(Number(pocketEl.dataset.pocketId), lp.mode === 'select');
     }
   });
   el.addEventListener('pointerup', (e)=>{
@@ -765,14 +1024,17 @@ function exitSelectionMode(){
   updateSelectionVisuals(); renderSelectionBar();
   document.getElementById('btnToggleSelectMode')?.classList.remove('!bg-forest','!text-white');
 }
-// (2026-07-13) Set data-selected attribute in updateSelectionVisuals; prev: none
+// (2026-07-13) Hide ring style.display when unselected; prev: opacity only
 function updateSelectionVisuals(){
   document.querySelectorAll('#towerDiagram [data-pocket-id]').forEach(g=>{
     const id = Number(g.dataset.pocketId);
     const isSel = selectionState.ids.has(id);
     g.setAttribute('data-selected', isSel ? 'true' : 'false');
     const ring = g.querySelector('.pocket-select-ring');
-    if(ring) ring.setAttribute('opacity', isSel ? '1' : '0');
+    if(ring){
+      ring.setAttribute('opacity', isSel ? '1' : '0');
+      ring.style.display = isSel ? 'block' : 'none';
+    }
   });
   document.querySelectorAll('[data-pocket-chip]').forEach(chip=>{
     chip.classList.toggle('ring-2', selectionState.ids.has(Number(chip.dataset.pocketChip)));
@@ -853,16 +1115,62 @@ document.getElementById('btnSelectionAll')?.addEventListener('click', ()=>{
   updateSelectionVisuals(); renderSelectionBar();
 });
 document.getElementById('btnSelectionAssign')?.addEventListener('click', ()=>openBulkAssignModal());
+// (2026-07-13) Clear plants in rows first before row deletion; prev: pocket level
 document.getElementById('btnSelectionClear')?.addEventListener('click', async ()=>{
-  if(!await showConfirm(`Clear ${selectionState.ids.size} selected pocket(s)?`, 'Clear Selection')) return;
-  const snapshotPockets = JSON.parse(JSON.stringify(state.pockets));
-  const count = selectionState.ids.size;
-  selectionState.ids.forEach(id=>{ const p=state.pockets.find(x=>x.id===id); if(p){ p.variety=null; p.datePlanted=null; p.override=null; } });
-  persist('pockets'); exitSelectionMode(); renderTower();
-  triggerUndoSnackbar(`Cleared ${count} selected pocket(s)`, ()=>{
-    state.pockets = snapshotPockets;
-    persist('pockets'); renderTower();
-  });
+  if(selectionState.ids.size === 0) return;
+  const selStr = new Set(Array.from(selectionState.ids).map(String));
+  const selectedPockets = state.pockets.filter(p=>selStr.has(String(p.id)));
+  if(selectedPockets.length === 0) return;
+
+  const targetRowIds = new Set(selectedPockets.map(p=>p.rowId).filter(Boolean));
+  if(targetRowIds.size === 0) return;
+
+  const allPocketsInTargetRows = state.pockets.filter(p=>targetRowIds.has(p.rowId));
+  const occupiedPockets = allPocketsInTargetRows.filter(p=>p.variety && String(p.variety).trim());
+
+  if(occupiedPockets.length > 0){
+    if(!await showConfirm(`Clear ${occupiedPockets.length} plant(s) from selected row(s)?`, 'Clear Plants')) return;
+    const snapshotPockets = JSON.parse(JSON.stringify(state.pockets));
+    occupiedPockets.forEach(p=>{ p.variety = null; p.datePlanted = null; p.override = null; });
+    persist('pockets'); exitSelectionMode(); renderTower();
+    showToast(`Cleared ${occupiedPockets.length} plant(s)`, 'clay', 'trash-2');
+    triggerUndoSnackbar(`Cleared ${occupiedPockets.length} plant(s)`, ()=>{
+      state.pockets = snapshotPockets;
+      persist('pockets'); renderTower();
+    });
+  } else {
+    const activeTower = getActiveTower();
+    const activeTowerRows = state.rows.filter(r=>(r.towerId||'t1')===activeTower.id);
+
+    // (2026-07-13) Min 3 rows protected for horizontal towers, 8 for vertical; prev: 8 fixed
+    const minRows = activeTower.type === 'horizontal' ? 3 : 8;
+    const protectedRowIds = new Set(activeTowerRows.slice(0, minRows).map(r=>r.id));
+    const rowsToDelete = activeTowerRows.filter(r=>targetRowIds.has(r.id) && !protectedRowIds.has(r.id));
+
+    if(rowsToDelete.length === 0){
+      showToast(`The first ${minRows} rows of the tower cannot be deleted`, 'clay', 'alert-triangle');
+      return;
+    }
+
+    if(!await showConfirm(`Delete ${rowsToDelete.length} selected row(s)? This cannot be undone.`, 'Delete Row(s)')) return;
+
+    const snapshotPockets = JSON.parse(JSON.stringify(state.pockets));
+    const snapshotRows = JSON.parse(JSON.stringify(state.rows));
+
+    const finalRowIdsToDelete = new Set(rowsToDelete.map(r=>r.id));
+
+    state.rows = state.rows.filter(r=>!finalRowIdsToDelete.has(r.id));
+    state.pockets = state.pockets.filter(p=>!finalRowIdsToDelete.has(p.rowId));
+
+    persist('pockets'); persist('rows'); exitSelectionMode(); renderTower();
+    showToast(`Deleted ${finalRowIdsToDelete.size} row(s)`, 'clay', 'trash-2');
+
+    triggerUndoSnackbar(`Deleted ${finalRowIdsToDelete.size} row(s)`, ()=>{
+      state.pockets = snapshotPockets;
+      state.rows = snapshotRows;
+      persist('pockets'); persist('rows'); renderTower();
+    });
+  }
 });
 document.getElementById('btnSelectionCancel')?.addEventListener('click', exitSelectionMode);
 
@@ -942,15 +1250,20 @@ function renderTower(){
     const card = document.createElement('div');
     card.className = 'bg-white rounded-2xl shadow-card border border-line p-4 md:p-5 flex flex-col gap-3';
     card.innerHTML = `
-      <button data-row-select="${row.id}" class="w-full flex items-center justify-between text-left group">
-        <div class="flex items-center gap-3">
+      <!-- (2026-07-13) Add row delete button to row cards; prev: modal only -->
+      <div class="w-full flex items-center justify-between gap-2">
+        <button data-row-select="${row.id}" class="flex-1 flex items-center gap-3 text-left group min-w-0">
           <span class="w-10 h-10 rounded-2xl bg-mint text-forest flex items-center justify-center flex-shrink-0">${icon('layers','w-5 h-5',20)}</span>
-          <div>
-            <div class="font-semibold text-[15px] text-ink">${rowLabel(row)} <span class="text-ink-soft font-normal text-[13px]">· ${pockets.length} pockets</span></div>
-            <div class="text-[12.5px] text-ink-soft mt-0.5">${rowSummary(row)}</div>
+          <div class="min-w-0">
+            <div class="font-semibold text-[15px] text-ink truncate">${rowLabel(row)} <span class="text-ink-soft font-normal text-[13px]">· ${pockets.length} pockets</span></div>
+            <div class="text-[12.5px] text-ink-soft mt-0.5 truncate">${rowSummary(row)}</div>
           </div>
+        </button>
+        <div class="flex items-center gap-1.5 flex-shrink-0">
+          <button data-row-fill="${row.id}" class="text-[12px] font-semibold text-forest bg-mint hover:bg-mint/80 px-3 py-1.5 rounded-xl transition-colors flex items-center gap-1 flex-shrink-0 shadow-xs">${icon('layers','w-3.5 h-3.5',14)} Fill Tier</button>
+          <button data-row-delete="${row.id}" class="w-8 h-8 rounded-xl bg-[#FCEBD8] hover:bg-[#F8DEC0] text-clay flex items-center justify-center transition-colors" title="Delete Row">${icon('trash-2','w-3.5 h-3.5',14)}</button>
         </div>
-      </button>
+      </div>
       <div class="flex gap-3 overflow-x-auto scrollbar-thin py-1">
         ${pockets.map(p=>pocketChipHTML(p)).join('')}
       </div>`;
@@ -964,6 +1277,11 @@ function renderTower(){
   list.appendChild(addCard);
 
   list.querySelectorAll('[data-row-select]').forEach(btn=>btn.addEventListener('click', ()=>openRowModal(btn.dataset.rowSelect)));
+  list.querySelectorAll('[data-row-fill]').forEach(btn=>btn.addEventListener('click', ()=>openRowModal(btn.dataset.rowFill)));
+  list.querySelectorAll('[data-row-delete]').forEach(btn=>btn.addEventListener('click', (e)=>{
+    e.stopPropagation();
+    deleteRow(btn.dataset.rowDelete);
+  }));
   list.querySelectorAll('[data-pocket-chip]').forEach(btn=>btn.addEventListener('click', (e)=>{
     e.stopPropagation();
     if(selectionState.active) toggleSelect(Number(btn.dataset.pocketChip), !selectionState.ids.has(Number(btn.dataset.pocketChip)));
@@ -971,13 +1289,1136 @@ function renderTower(){
   }));
   updateSelectionVisuals();
   renderSelectionBar();
+  renderTowerPhotoGallery();
+  
+  // Render Growth Gallery on Tower page
+  renderGrowthGallery('galleryStripTower');
 }
+
+// (2026-07-13) Constant 380px height, SVG arrow nav, Jan 1, 2020 date; prev: dynamic
+function formatLogDate(dateStr){
+  if(!dateStr || dateStr === '—') return '—';
+  const d = new Date(dateStr);
+  if(isNaN(d.getTime())) return dateStr;
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function renderTowerPhotoGallery(){
+  const grid = document.getElementById('towerPhotoGalleryGrid');
+  const listFeed = document.getElementById('towerPhotoGalleryList');
+  const btnLoadMore = document.getElementById('btnLoadMorePhotos');
+  const empty = document.getElementById('towerPhotoGalleryEmpty');
+  const countEl = document.getElementById('photoLogCount');
+  const btnGrid = document.getElementById('btnPhotoViewGrid');
+  const btnList = document.getElementById('btnPhotoViewList');
+
+  if(!grid) return;
+
+  const log = (state.photoLog || []).filter(e=> !state.activeTowerId || e.towerId === state.activeTowerId);
+  if(countEl) countEl.textContent = `${log.length} photo${log.length!==1?'s':''}`;
+
+  // Initialize multi-select state
+  if(!state.photoMultiSelect) state.photoMultiSelect = { active: false, selectedIds: [] };
+
+  if(log.length === 0){
+    grid.innerHTML='';
+    if(listFeed) listFeed.innerHTML='';
+    grid.classList.add('hidden');
+    listFeed?.classList.add('hidden');
+    btnLoadMore?.classList.add('hidden');
+    empty?.classList.remove('hidden');
+    return;
+  }
+  empty?.classList.add('hidden');
+
+  const viewMode = state.photoViewMode || 'grid';
+  if(btnGrid && btnList){
+    btnGrid.className = viewMode === 'grid' ? 'px-2.5 py-1 rounded-lg text-[11.5px] font-semibold bg-white text-forest shadow-xs border border-line/40 transition-all' : 'px-2.5 py-1 rounded-lg text-[11.5px] font-semibold text-ink-soft hover:text-forest bg-transparent transition-all';
+    btnList.className = viewMode === 'list' ? 'px-2.5 py-1 rounded-lg text-[11.5px] font-semibold bg-white text-forest shadow-xs border border-line/40 transition-all' : 'px-2.5 py-1 rounded-lg text-[11.5px] font-semibold text-ink-soft hover:text-forest bg-transparent transition-all';
+
+    btnGrid.onclick = () => { state.photoViewMode = 'grid'; renderTowerPhotoGallery(); };
+    btnList.onclick = () => { state.photoViewMode = 'list'; renderTowerPhotoGallery(); };
+  }
+
+  const healthColor = { healthy:'#22C55E', unhealthy:'#F59E0B', dead:'#EF4444' };
+  const healthLabel = { healthy:'Healthy', unhealthy:'Unhealthy', dead:'Dead' };
+
+  if(viewMode === 'grid'){
+    listFeed?.classList.add('hidden');
+    btnLoadMore?.classList.add('hidden');
+    grid.classList.remove('hidden');
+
+    const MAX_VISIBLE = 9;
+    const visible = log.slice(0, MAX_VISIBLE);
+    const overflow = log.length - MAX_VISIBLE;
+
+    let html = '';
+    visible.forEach((e, i)=>{
+      const isLastAndHasMore = i === MAX_VISIBLE - 1 && overflow > 0;
+      const overflowLabel = overflow >= 99 ? '99+' : `+${overflow}`;
+      // (2026-07-13) Object-cover & dark bottom gradient on grid tiles; prev: fit stretch
+      html += `<div class="photo-log-card group relative cursor-pointer rounded-2xl overflow-hidden bg-black shadow-sm border border-line/20 aspect-square" data-photo-id="${e.id}">
+        <img src="${e.dataUrl}" style="width:100% !important; height:100% !important; object-fit:cover !important;" class="block ${isLastAndHasMore?'brightness-50':'group-hover:scale-105 transition-transform duration-300'}" alt="${e.variety} photo" loading="lazy">
+        // (2026-07-13) Soft gradient & z-20 pure white text overlay; prev: dark covered
+        ${isLastAndHasMore ? `
+          <div class="absolute inset-0 flex flex-col items-center justify-center text-white pointer-events-none bg-black/40 z-20">
+            <div class="font-display font-bold text-[28px] leading-none">${overflowLabel}</div>
+            <div class="text-[11px] font-medium opacity-80 mt-1">more photos</div>
+          </div>` : `
+          <div style="position:absolute !important; bottom:0 !important; left:0 !important; right:0 !important; width:100% !important; height:50% !important; background:linear-gradient(to top, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.3) 60%, rgba(0,0,0,0) 100%) !important; pointer-events:none !important; z-index:5 !important;"></div>
+          <div class="absolute inset-x-0 bottom-0 p-2 text-white pointer-events-none w-full overflow-hidden" style="z-index:20 !important;">
+            <div class="font-bold truncate text-white" style="font-size:10px !important; line-height:1.15; color:#FFFFFF !important; text-shadow:0 1px 3px rgba(0,0,0,0.9);">${e.variety}</div>
+            <div class="truncate mt-0.5" style="font-size:8.5px !important; line-height:1.1; color:#FFFFFF !important; opacity:0.9; text-shadow:0 1px 2px rgba(0,0,0,0.9);">${e.stage} · Day ${e.day}</div>
+          </div>`}
+      </div>`;
+    });
+    grid.innerHTML = html;
+
+    grid.querySelectorAll('[data-photo-id]').forEach(card=>{
+      card.addEventListener('click', ()=>openPhotoDetailModal(card.dataset.photoId));
+    });
+  } else {
+    grid.classList.add('hidden');
+    listFeed?.classList.remove('hidden');
+
+    const limit = state.photoListLimit || 4;
+    const visible = log.slice(0, limit);
+    const hasMore = log.length > limit;
+
+    let html = '';
+    // (2026-07-13) Compact Google Drive style list row with 32px thumbnail + multi-select support
+    visible.forEach(e=>{
+      const hc = healthColor[e.health] || '#22C55E';
+      const hl = healthLabel[e.health] || 'Healthy';
+      const formattedDate = formatLogDate(e.dateLabel || e.datePlanted);
+      const isSelected = state.photoMultiSelect.selectedIds.includes(e.id);
+      const checkboxHtml = state.photoMultiSelect.active ? `<div class="w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors ${isSelected ? 'bg-forest border-forest' : 'border-ink-soft/40 bg-white'}">
+        ${isSelected ? '<svg class="w-3 h-3 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>' : ''}
+      </div>` : '';
+      
+      html += `<div class="photo-log-item group flex items-center justify-between py-2 px-1.5 border-b border-line/30 hover:bg-cream/60 transition-colors cursor-pointer ${isSelected ? 'bg-forest/5' : ''}" data-photo-id="${e.id}">
+        <div class="flex items-center gap-3 min-w-0 pr-2">
+          ${checkboxHtml}
+          <img src="${e.dataUrl}" class="w-8 h-8 rounded-md object-cover flex-shrink-0 bg-black border border-line/40 shadow-xs" alt="${e.variety} photo" loading="lazy">
+          <div class="min-w-0">
+            <div class="text-[13px] font-semibold text-ink truncate leading-tight">${e.variety}</div>
+            <div class="text-[10.5px] text-ink-soft truncate mt-0.5">${e.stage} · Day ${e.day}</div>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 flex-shrink-0">
+          <span class="text-[10.5px] font-mono text-ink-soft">${formattedDate}</span>
+          <span class="text-[9.5px] font-semibold px-2 py-0.5 rounded-full" style="background:${hc}18;color:${hc};border:1px solid ${hc}44">${hl}</span>
+        </div>
+      </div>`;
+    });
+    listFeed.innerHTML = html;
+
+    // Multi-select functionality with long press
+    let longPressTimer = null;
+    let touchStartY = 0;
+    let touchStartX = 0;
+    let lastSelectedId = null;
+    let isDraggingToSelect = false;
+    let hasMovedEnough = false;
+
+    listFeed.querySelectorAll('.photo-log-item').forEach(item=>{
+      const photoId = item.dataset.photoId;
+      
+      // Touch events for long press activation
+      item.addEventListener('touchstart', (e) => {
+        touchStartY = e.touches[0].clientY;
+        touchStartX = e.touches[0].clientX;
+        isDraggingToSelect = false;
+        hasMovedEnough = false;
+        
+        longPressTimer = setTimeout(() => {
+          // Long press triggered - activate drag-to-select
+          if(!hasMovedEnough){
+            if(!state.photoMultiSelect.active){
+              // First time activating multi-select
+              state.photoMultiSelect.active = true;
+              state.photoMultiSelect.selectedIds = [photoId];
+            }
+            // Enable dragging to select more items (works on subsequent long-presses too)
+            isDraggingToSelect = true;
+            renderTowerPhotoGallery();
+            renderPhotoMultiSelectBar();
+            // Haptic feedback if available
+            if(window.navigator && window.navigator.vibrate){
+              window.navigator.vibrate(50);
+            }
+          }
+        }, 500); // 500ms long press
+      });
+
+      item.addEventListener('touchmove', (e) => {
+        const currentY = e.touches[0].clientY;
+        const currentX = e.touches[0].clientX;
+        const scrollDistance = Math.abs(currentY - touchStartY);
+        const horizontalDistance = Math.abs(currentX - touchStartX);
+        
+        // User has moved enough to be considered scrolling
+        if(scrollDistance > 10 || horizontalDistance > 10){
+          hasMovedEnough = true;
+          
+          // Cancel long press timer if user is scrolling (not in multi-select mode yet)
+          if(!state.photoMultiSelect.active){
+            clearTimeout(longPressTimer);
+            return;
+          }
+        }
+        
+        // Only prevent scrolling if we're actively dragging to select in multi-select mode
+        if(state.photoMultiSelect.active && isDraggingToSelect){
+          e.preventDefault(); // Stop page scroll only when dragging to select
+          e.stopPropagation();
+          
+          // Find which item is under the touch
+          const touchedElement = document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY);
+          const touchedItem = touchedElement?.closest('.photo-log-item');
+          if(touchedItem && touchedItem.dataset.photoId){
+            const touchedId = touchedItem.dataset.photoId;
+            if(!state.photoMultiSelect.selectedIds.includes(touchedId)){
+              state.photoMultiSelect.selectedIds.push(touchedId);
+              renderTowerPhotoGallery();
+              renderPhotoMultiSelectBar();
+              // Small haptic on each selection
+              if(window.navigator && window.navigator.vibrate){
+                window.navigator.vibrate(10);
+              }
+            }
+          }
+        }
+      }, { passive: false }); // Important: passive: false to allow preventDefault
+
+      item.addEventListener('touchend', (e) => {
+        clearTimeout(longPressTimer);
+        
+        // If was dragging in multi-select mode, don't trigger click
+        if(isDraggingToSelect){
+          e.preventDefault();
+          isDraggingToSelect = false;
+          return;
+        }
+        isDraggingToSelect = false;
+        hasMovedEnough = false;
+      });
+
+      item.addEventListener('touchcancel', () => {
+        clearTimeout(longPressTimer);
+        isDraggingToSelect = false;
+        hasMovedEnough = false;
+      });
+
+      // Click handler
+      item.addEventListener('click', (e) => {
+        // Don't open photo if we were dragging
+        if(isDraggingToSelect){
+          e.preventDefault();
+          return;
+        }
+        
+        if(state.photoMultiSelect.active){
+          // Toggle selection
+          const idx = state.photoMultiSelect.selectedIds.indexOf(photoId);
+          if(idx > -1){
+            state.photoMultiSelect.selectedIds.splice(idx, 1);
+          } else {
+            state.photoMultiSelect.selectedIds.push(photoId);
+          }
+          renderTowerPhotoGallery();
+          renderPhotoMultiSelectBar();
+          
+          // Exit multi-select if no items selected
+          if(state.photoMultiSelect.selectedIds.length === 0){
+            state.photoMultiSelect.active = false;
+            renderTowerPhotoGallery();
+            renderPhotoMultiSelectBar();
+          }
+        } else {
+          openPhotoDetailModal(photoId);
+        }
+      });
+    });
+
+    if(hasMore && btnLoadMore){
+      btnLoadMore.classList.remove('hidden');
+      btnLoadMore.onclick = () => {
+        state.photoListLimit = (state.photoListLimit || 4) + 4;
+        renderTowerPhotoGallery();
+      };
+    } else {
+      btnLoadMore?.classList.add('hidden');
+    }
+  }
+}
+
+// Multi-select action bar for photos
+function renderPhotoMultiSelectBar(){
+  let bar = document.getElementById('photoMultiSelectBar');
+  
+  if(!state.photoMultiSelect || !state.photoMultiSelect.active || state.photoMultiSelect.selectedIds.length === 0){
+    if(bar) bar.remove();
+    return;
+  }
+
+  const count = state.photoMultiSelect.selectedIds.length;
+  
+  if(!bar){
+    bar = document.createElement('div');
+    bar.id = 'photoMultiSelectBar';
+    bar.className = 'fixed bottom-20 md:bottom-6 left-1/2 -translate-x-1/2 bg-forest text-white rounded-2xl shadow-lg px-3 py-2.5 flex items-center gap-2 max-w-[94vw]';
+    bar.style.cssText = 'animation: slideUpIn 0.3s ease-out; z-index: 9999999;';
+    document.body.appendChild(bar);
+  }
+
+  bar.innerHTML = `
+    <button id="btnCancelMultiSelect" class="text-white/70 p-1.5 flex-shrink-0">
+      ${icon('x','w-4 h-4',16)}
+    </button>
+    <span class="text-[13px] font-semibold whitespace-nowrap flex-shrink-0">${count} selected</span>
+    <div class="w-px h-5 bg-white/20 flex-shrink-0"></div>
+    <button id="btnDeleteSelected" class="text-[12.5px] font-semibold bg-white/15 w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" aria-label="Delete selected">
+      ${icon('trash-2','w-4 h-4',16)}
+    </button>
+  `;
+
+  // Cancel button
+  bar.querySelector('#btnCancelMultiSelect').onclick = () => {
+    state.photoMultiSelect.active = false;
+    state.photoMultiSelect.selectedIds = [];
+    renderTowerPhotoGallery();
+    renderPhotoMultiSelectBar();
+  };
+
+  // Delete button
+  bar.querySelector('#btnDeleteSelected').onclick = () => {
+    // Show custom delete confirmation modal
+    showDeletePhotosModal(count, () => {
+      const idsToDelete = [...state.photoMultiSelect.selectedIds];
+      
+      // Delete from state
+      state.photoLog = (state.photoLog || []).filter(x => !idsToDelete.includes(x.id));
+      persist('photoLog');
+      
+      // Delete from Firestore
+      if(typeof cloudSync !== 'undefined' && cloudSync.connected){
+        idsToDelete.forEach(id => {
+          cloudSync.deletePhoto(id).catch(err => console.error('Photo delete error:', err));
+        });
+      }
+      
+      // Reset multi-select
+      state.photoMultiSelect.active = false;
+      state.photoMultiSelect.selectedIds = [];
+      
+      renderTowerPhotoGallery();
+      renderPhotoMultiSelectBar();
+      showToast(`Deleted ${count} photo${count !== 1 ? 's' : ''}`, 'clay', 'trash-2');
+    });
+  };
+}
+
+// Delete photos confirmation modal
+function showDeletePhotosModal(count, onConfirm){
+  let existing = document.getElementById('deletePhotosModal');
+  if(existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'deletePhotosModal';
+  modal.className = 'fixed inset-0 flex items-center justify-center p-4';
+  modal.style.cssText = 'background:rgba(15,25,20,0.95); backdrop-filter:blur(16px); opacity:0; transition:opacity 0.25s ease-out; z-index: 999999999 !important;';
+  
+  modal.innerHTML = `
+    <div class="bg-white w-full max-w-sm p-6 shadow-2xl relative" style="border-radius: 32px; animation: modalPopIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; z-index: 999999999 !important;">
+      <div class="flex items-center justify-center mb-4">
+        <div class="w-16 h-16 rounded-full bg-clay/10 flex items-center justify-center">
+          ${icon('trash-2','w-8 h-8 text-clay',32)}
+        </div>
+      </div>
+      
+      <h3 class="font-display font-bold text-[22px] text-forest text-center mb-2">Delete Photos?</h3>
+      <p class="text-[15px] text-ink-soft text-center mb-6 leading-relaxed">Are you sure you want to delete <strong class="text-ink">${count} photo${count !== 1 ? 's' : ''}</strong>? This action cannot be undone.</p>
+      
+      <div class="flex gap-3">
+        <button id="btnCancelDelete" class="flex-1 bg-cream hover:bg-cream-dark text-ink font-bold text-[15px] py-4 transition-colors" style="border-radius: 20px;">
+          Cancel
+        </button>
+        <button id="btnConfirmDelete" class="flex-1 bg-clay hover:bg-clay/90 text-white font-bold text-[15px] py-4 transition-colors active:scale-[0.98] shadow-lg" style="border-radius: 20px;">
+          Delete
+        </button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+  
+  // Fade in
+  requestAnimationFrame(() => {
+    modal.style.opacity = '1';
+  });
+
+  const closeModal = () => {
+    modal.style.opacity = '0';
+    setTimeout(() => modal.remove(), 200);
+  };
+
+  modal.querySelector('#btnCancelDelete').onclick = closeModal;
+  modal.querySelector('#btnConfirmDelete').onclick = () => {
+    closeModal();
+    onConfirm();
+  };
+  
+  // Close on backdrop click
+  modal.addEventListener('click', (e) => {
+    if(e.target === modal) closeModal();
+  });
+}
+
+// (2026-07-13) Immutable snapshot attributes for photo logs; prev: live compute
+function getTowerCropSummary(e){
+  if(e && (e.snapshotCropBatches || e.cropSummary)){
+    const cropSummary = e.snapshotCropBatches || e.cropSummary;
+    const healthLabel = e.snapshotOverallHealth || e.healthLabel || 'Healthy';
+    const healthColor = e.snapshotHealthColor || e.healthColor || '#22C55E';
+    const healthKey = e.snapshotHealthKey || e.healthKey || 'healthy';
+    const datePlanted = e.snapshotDatePlanted || (e.datePlanted ? formatLogDate(e.datePlanted) : 'Aug 8, 2026');
+
+    if(typeof e === 'object'){
+      e.snapshotCropBatches = cropSummary;
+      e.snapshotOverallHealth = healthLabel;
+      e.snapshotHealthColor = healthColor;
+      e.snapshotHealthKey = healthKey;
+      e.snapshotDatePlanted = datePlanted;
+      e.cropSummary = cropSummary;
+      e.healthLabel = healthLabel;
+      e.healthColor = healthColor;
+    }
+
+    return { cropSummary, healthKey, healthLabel, healthColor, datePlanted };
+  }
+
+  const towerId = e?.towerId || state.activeTowerId;
+  const towerPockets = state.pockets.filter(p=> p.variety && state.rows.find(r=>r.id===p.rowId && r.towerId===towerId));
+
+  let healthyCount = 0, unhealthyCount = 0, deadCount = 0;
+  const batchesMap = new Map();
+
+  if(towerPockets.length > 0){
+    towerPockets.forEach(p => {
+      const row = state.rows.find(r=>r.id===p.rowId);
+      const pState = getPocketState(p);
+      const day = pState.day || (row && row.startDate ? Math.max(1, dayOfCycle(row.startDate)) : (p.day || e?.day || 1));
+      const key = `${p.variety}_${day}`;
+      if(!batchesMap.has(key)){
+        batchesMap.set(key, { variety: p.variety, day });
+      }
+      const h = p.health || 'healthy';
+      if(h === 'healthy') healthyCount++;
+      else if(h === 'unhealthy') unhealthyCount++;
+      else if(h === 'dead') deadCount++;
+    });
+  } else {
+    batchesMap.set(`${e?.variety||'Tower General'}_${e?.day||0}`, { variety: e?.variety||'Tower General', day: e?.day||0 });
+    if(e?.health === 'healthy') healthyCount++;
+    else if(e?.health === 'unhealthy') unhealthyCount++;
+    else if(e?.health === 'dead') deadCount++;
+  }
+
+  const batches = Array.from(batchesMap.values());
+  const cropSummary = batches.map(b => `${b.variety} (Day ${b.day})`).join(' · ');
+
+  const total = healthyCount + unhealthyCount + deadCount;
+  const healthyPct = total > 0 ? (healthyCount / total) * 100 : 100;
+
+  let healthKey = 'healthy';
+  let healthLabel = 'Healthy';
+  let healthColor = '#22C55E';
+
+  if(healthyPct >= 80){
+    healthKey = 'healthy';
+    healthLabel = healthyPct === 100 ? 'Healthy' : 'Mostly Healthy';
+    healthColor = '#22C55E';
+  } else if(unhealthyCount >= deadCount){
+    healthKey = 'unhealthy';
+    healthLabel = 'Needs Attention';
+    healthColor = '#F59E0B';
+  } else {
+    healthKey = 'dead';
+    healthLabel = 'Requires Care';
+    healthColor = '#EF4444';
+  }
+
+  const datePlanted = e?.datePlanted ? formatLogDate(e.datePlanted) : 'Aug 8, 2026';
+
+  if(e && typeof e === 'object'){
+    e.snapshotCropBatches = cropSummary;
+    e.snapshotOverallHealth = healthLabel;
+    e.snapshotHealthColor = healthColor;
+    e.snapshotHealthKey = healthKey;
+    e.snapshotDatePlanted = datePlanted;
+    e.cropSummary = cropSummary;
+    e.healthLabel = healthLabel;
+    e.healthColor = healthColor;
+    persist('photoLog');
+  }
+
+  return { cropSummary, healthKey, healthLabel, healthColor, datePlanted };
+}
+
+function openPhotoDetailModal(photoId){
+  const log = (state.photoLog || []).filter(e=> !state.activeTowerId || e.towerId === state.activeTowerId);
+  if(log.length === 0) return;
+
+  let currentIndex = log.findIndex(x=>x.id===photoId);
+  if(currentIndex === -1) currentIndex = 0;
+
+  let existing = document.getElementById('photoDetailModal');
+  if(existing) existing.remove();
+
+  const prevOverflow = document.body.style.overflow;
+  document.body.style.overflow = 'hidden';
+
+  const modal = document.createElement('div');
+  modal.id = 'photoDetailModal';
+  modal.setAttribute('role','dialog');
+  modal.setAttribute('aria-modal','true');
+  modal.style.cssText = 'position:fixed !important; top:0 !important; left:0 !important; right:0 !important; bottom:0 !important; width:100vw !important; height:100vh !important; z-index:999999 !important; background:#ffffff !important; display:flex; flex-direction:column; justify-content:space-between; overflow-y:auto; user-select:none; transition:all 0.2s ease-out; opacity:0; transform:scale(0.98);';
+
+  requestAnimationFrame(()=>{
+    modal.style.opacity = '1';
+    modal.style.transform = 'scale(1)';
+  });
+
+  // (2026-07-13) Compact 25% top gradient, smaller text & 7x7 X button; prev: 45%
+  function renderLightboxContent(slideDirection = ''){
+    const e = log[currentIndex];
+    const prevPhoto = currentIndex > 0 ? log[currentIndex - 1] : null;
+    const nextPhoto = currentIndex < log.length - 1 ? log[currentIndex + 1] : null;
+    const formattedDate = formatLogDate(e.dateLabel || e.datePlanted);
+
+    // (2026-07-13) Render detail cards strictly from static snapshot metadata; prev: live
+    const summaryInfo = getTowerCropSummary(e);
+    const snapshotCropBatches = e.snapshotCropBatches || summaryInfo.cropSummary;
+    const snapshotOverallHealth = e.snapshotOverallHealth || summaryInfo.healthLabel;
+    const snapshotHealthColor = e.snapshotHealthColor || summaryInfo.healthColor;
+    const snapshotDatePlanted = e.snapshotDatePlanted || summaryInfo.datePlanted;
+    const snapshotStage = e.snapshotStage || e.stage || 'Vegetative';
+
+    const slideAnimClass = slideDirection === 'left' ? 'animate-slide-left' : slideDirection === 'right' ? 'animate-slide-right' : 'animate-fade-in';
+
+    // Calculate file size for display
+    const fileSize = getFileSizeFromDataUrl(e.dataUrl);
+
+    // (2026-07-13) Add Growth Stage 4th card for 2x2 grid symmetry; prev: 3 cards
+    modal.innerHTML = `
+      <div style="width:100% !important; height:60vh !important; max-height:60vh !important; min-height:60vh !important; flex-shrink:0 !important; overflow:hidden !important; position:relative !important; background:#111111 !important;" class="flex items-center justify-center">
+        <div id="photoSlideWrapper" class="w-full h-full relative flex items-center justify-center transition-transform duration-300 ${slideAnimClass}">
+          ${prevPhoto ? `<img src="${prevPhoto.dataUrl}" style="position:absolute !important; left:-86% !important; top:0 !important; width:82% !important; height:100% !important; object-fit:cover !important; opacity:0.35 !important; filter:brightness(0.6) blur(0.5px) !important; border-radius:16px !important;" class="pointer-events-none" alt="previous photo preview">` : ''}
+          <img id="lightboxImg" src="${e.dataUrl}" style="width:100% !important; height:100% !important; max-height:60vh !important; object-fit:cover !important; object-position:center !important;" class="block transition-all duration-300 cursor-pointer relative z-10" alt="${e.variety} photo">
+          ${nextPhoto ? `<img src="${nextPhoto.dataUrl}" style="position:absolute !important; right:-86% !important; top:0 !important; width:82% !important; height:100% !important; object-fit:cover !important; opacity:0.35 !important; filter:brightness(0.6) blur(0.5px) !important; border-radius:16px !important;" class="pointer-events-none" alt="next photo preview">` : ''}
+        </div>
+
+        <div style="position:absolute !important; top:0 !important; left:0 !important; right:0 !important; width:100% !important; height:25% !important; background:linear-gradient(to bottom, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.3) 65%, rgba(0,0,0,0) 100%) !important; pointer-events:none !important; z-index:25 !important;"></div>
+        <div style="position:absolute !important; top:max(18px, calc(14px + env(safe-area-inset-top))) !important; left:0 !important; right:0 !important; width:100% !important; z-index:40 !important;" class="px-4 pt-1 flex items-center justify-between text-white pointer-events-auto">
+          <div class="flex items-center gap-2">
+            <span class="text-[10.5px] font-semibold bg-black/50 backdrop-blur-md px-2.5 py-0.5 rounded-full border border-white/20 text-white shadow-xs">${currentIndex + 1} of ${log.length}</span>
+            <span class="text-[11px] font-medium text-white/90 drop-shadow-sm">${e.towerName}</span>
+          </div>
+          <button id="photoDetailClose" type="button" class="w-7 h-7 rounded-full bg-black/50 backdrop-blur-md hover:bg-black/70 active:scale-95 flex items-center justify-center text-white font-bold text-[13px] transition-all border border-white/20 shadow-xs">✕</button>
+        </div>
+
+        ${currentIndex > 0 ? `
+          <button id="btnPrevPhoto" type="button" style="position:absolute !important; left:6px !important; top:50% !important; transform:translateY(-50%) !important; z-index:40 !important; cursor:pointer !important;" class="p-2 text-white/40 hover:text-white/95 active:scale-95 transition-opacity duration-200 pointer-events-auto">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="w-8 h-8 drop-shadow-md"><path d="m15 18-6-6 6-6"/></svg>
+          </button>` : ''}
+        
+        ${currentIndex < log.length - 1 ? `
+          <button id="btnNextPhoto" type="button" style="position:absolute !important; right:6px !important; top:50% !important; transform:translateY(-50%) !important; z-index:40 !important; cursor:pointer !important;" class="p-2 text-white/40 hover:text-white/95 active:scale-95 transition-opacity duration-200 pointer-events-auto">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="w-8 h-8 drop-shadow-md"><path d="m9 18 6-6-6-6"/></svg>
+          </button>` : ''}
+
+        <div class="absolute bottom-0 left-0 right-0 w-full p-4 pt-12 text-white flex items-end justify-between pointer-events-none z-20" style="background: linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.6) 50%, transparent 100%);">
+          <div class="min-w-0 pr-3">
+            <div class="text-[17px] font-bold text-white drop-shadow-md leading-tight truncate">${e.towerName}</div>
+            <div class="text-[12.5px] text-white/90 drop-shadow-md mt-0.5 font-medium truncate">${snapshotCropBatches}</div>
+          </div>
+          <span class="text-[11px] font-semibold px-3 py-1 rounded-full drop-shadow-md flex-shrink-0" style="background:${snapshotHealthColor}44;color:#FFFFFF;border:1px solid ${snapshotHealthColor}">${snapshotOverallHealth}</span>
+        </div>
+      </div>
+
+      <div class="flex-1 bg-white p-4 md:p-5 flex flex-col justify-between max-w-xl mx-auto w-full">
+        <div class="flex flex-col gap-3">
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <h3 class="font-display font-bold text-[18px] text-forest truncate min-w-0">${e.towerName}</h3>
+            <div class="flex items-center gap-2 flex-shrink-0">
+              <span class="text-[10.5px] font-semibold font-mono text-ink-soft/80 bg-cream/80 px-2 py-0.5 rounded-md border border-line/50">${fileSize}</span>
+              <span class="text-[11.5px] font-semibold font-mono text-ink-soft bg-cream px-2.5 py-1 rounded-full border border-line/60">${formattedDate}</span>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2.5 text-[12.5px]">
+            <div class="bg-cream/60 rounded-2xl p-3 border border-line/60 col-span-2">
+              <div class="text-[10.5px] font-semibold text-ink-soft uppercase tracking-wider mb-0.5">Crop Batches</div>
+              <div class="font-semibold text-ink leading-snug">${snapshotCropBatches}</div>
+            </div>
+            <div class="bg-cream/60 rounded-2xl p-3 border border-line/60">
+              <div class="text-[10.5px] font-semibold text-ink-soft uppercase tracking-wider mb-0.5">Overall Health</div>
+              <div class="font-semibold" style="color:${snapshotHealthColor}">${snapshotOverallHealth}</div>
+            </div>
+            <div class="bg-cream/60 rounded-2xl p-3 border border-line/60">
+              <div class="text-[10.5px] font-semibold text-ink-soft uppercase tracking-wider mb-0.5">Growth Stage</div>
+              <div class="font-semibold text-forest">${snapshotStage}</div>
+            </div>
+            <div class="bg-cream/60 rounded-2xl p-3 border border-line/60 col-span-2">
+              <div class="text-[10.5px] font-semibold text-ink-soft uppercase tracking-wider mb-0.5">Date Planted</div>
+              <div class="font-semibold text-ink">${snapshotDatePlanted}</div>
+            </div>
+          </div>
+        </div>
+
+        <button id="photoDetailDelete" type="button" class="w-full mt-4 text-[13px] font-semibold text-clay bg-[#FCEBD8] hover:bg-[#F8DEC0] rounded-xl py-3 flex items-center justify-center gap-1.5 transition-colors">
+          ${icon('trash-2','w-4 h-4',16)} Delete Photo Log
+        </button>
+      </div>
+    `;
+
+    const imgEl = modal.querySelector('#lightboxImg');
+    if(imgEl){
+      imgEl.addEventListener('click', ()=>{
+        openFullscreenZoomViewer(log, currentIndex);
+      });
+    }
+
+    document.getElementById('photoDetailClose').onclick = closeModal;
+
+    const btnPrev = document.getElementById('btnPrevPhoto');
+    if(btnPrev) btnPrev.onclick = () => { if(currentIndex > 0){ currentIndex--; renderLightboxContent('right'); } };
+
+    const btnNext = document.getElementById('btnNextPhoto');
+    if(btnNext) btnNext.onclick = () => { if(currentIndex < log.length - 1){ currentIndex++; renderLightboxContent('left'); } };
+
+    // (2026-07-13) Photo deletion with interactive Undo toast action; prev: no undo
+    const btnDel = document.getElementById('photoDetailDelete');
+    if(btnDel){
+      btnDel.onclick = () => {
+        const deletedEntry = log[currentIndex];
+        const deletedIdx = currentIndex;
+        state.photoLog = (state.photoLog||[]).filter(x=>x.id!==deletedEntry.id);
+        persist('photoLog');
+        
+        // (2026-07-13) Delete photo from Firestore subcollection
+        if(typeof cloudSync !== 'undefined' && cloudSync.connected){
+          cloudSync.deletePhoto(deletedEntry.id).catch(err => console.error('Photo delete error:', err));
+        }
+        
+        closeModal();
+        renderTowerPhotoGallery();
+
+        showToast('Photo log deleted', 'clay', 'trash-2', {
+          actionLabel: 'Undo',
+          onAction: () => {
+            if(deletedEntry){
+              if(!state.photoLog) state.photoLog = [];
+              state.photoLog.splice(Math.min(deletedIdx, state.photoLog.length), 0, deletedEntry);
+              persist('photoLog');
+              
+              // Re-sync to Firestore on undo
+              if(typeof cloudSync !== 'undefined' && cloudSync.connected){
+                cloudSync.syncPhoto(deletedEntry).catch(err => console.error('Photo restore error:', err));
+              }
+              
+              renderTowerPhotoGallery();
+              showToast('Photo log restored', 'forest', 'rotate-ccw');
+            }
+          }
+        });
+      };
+    }
+
+    const viewerArea = modal.querySelector('#photoSlideWrapper');
+    let startX = 0;
+    let startY = 0;
+    let isDraggingDown = false;
+
+    viewerArea.addEventListener('touchstart', (ev) => {
+      if(ev.touches.length === 1){
+        startX = ev.touches[0].clientX;
+        startY = ev.touches[0].clientY;
+        isDraggingDown = false;
+      }
+    }, { passive: true });
+
+    viewerArea.addEventListener('touchmove', (ev) => {
+      if(ev.touches.length === 1 && !isDraggingDown){
+        const deltaY = ev.touches[0].clientY - startY;
+        if(deltaY > 20){
+          isDraggingDown = true;
+          modal.style.transition = 'none';
+        }
+        if(isDraggingDown && deltaY > 0){
+          modal.style.transform = `translateY(${deltaY * 0.5}px) scale(${1 - deltaY * 0.0003})`;
+          modal.style.opacity = `${1 - deltaY * 0.002}`;
+        }
+      }
+    }, { passive: true });
+
+    viewerArea.addEventListener('touchend', (ev) => {
+      if(ev.changedTouches.length === 1){
+        const deltaX = ev.changedTouches[0].clientX - startX;
+        const deltaY = ev.changedTouches[0].clientY - startY;
+
+        if(isDraggingDown && deltaY > 120){
+          modal.style.transition = 'all 0.25s ease-out';
+          modal.style.opacity = '0';
+          modal.style.transform = 'translateY(100%) scale(0.9)';
+          setTimeout(()=>{
+            document.body.style.overflow = prevOverflow;
+            window.removeEventListener('keydown', handleKeyNav);
+            modal.remove();
+          }, 250);
+          return;
+        }
+
+        if(isDraggingDown){
+          modal.style.transition = 'all 0.2s ease-out';
+          modal.style.transform = 'scale(1)';
+          modal.style.opacity = '1';
+          isDraggingDown = false;
+        }
+
+        if(!isDraggingDown && Math.abs(deltaX) > 40 && Math.abs(deltaX) > Math.abs(deltaY)){
+          if(deltaX < 0 && currentIndex < log.length - 1){
+            currentIndex++;
+            renderLightboxContent('left');
+          } else if(deltaX > 0 && currentIndex > 0){
+            currentIndex--;
+            renderLightboxContent('right');
+          }
+        }
+      }
+    }, { passive: true });
+  }
+
+  function closeModal(){
+    modal.style.opacity = '0';
+    modal.style.transform = 'scale(0.98)';
+    setTimeout(()=>{
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener('keydown', handleKeyNav);
+      modal.remove();
+    }, 150);
+  }
+
+  function handleKeyNav(ev){
+    if(ev.key === 'ArrowLeft' && currentIndex > 0){
+      currentIndex--; renderLightboxContent('right');
+    } else if(ev.key === 'ArrowRight' && currentIndex < log.length - 1){
+      currentIndex++; renderLightboxContent('left');
+    } else if(ev.key === 'Escape'){
+      closeModal();
+    }
+  }
+
+  window.addEventListener('keydown', handleKeyNav);
+  document.body.appendChild(modal);
+  renderLightboxContent();
+}
+
+// (2026-07-13) Fullscreen gallery: double-tap zoom, swipe peeking & album filmstrip
+function openFullscreenZoomViewer(log, initialIndex = 0){
+  if(!log || log.length === 0) return;
+  let currentIndex = Math.max(0, Math.min(initialIndex, log.length - 1));
+  let existing = document.getElementById('fullscreenZoomModal');
+  if(existing) existing.remove();
+
+  // (2026-07-13) Set role=dialog for universal back button stack; prev: no role
+  const fullModal = document.createElement('div');
+  fullModal.id = 'fullscreenZoomModal';
+  fullModal.setAttribute('role', 'dialog');
+  fullModal.setAttribute('aria-modal', 'true');
+  fullModal.style.cssText = 'position:fixed !important; top:0 !important; left:0 !important; right:0 !important; bottom:0 !important; width:100vw !important; height:100vh !important; z-index:9999999 !important; background:#000000 !important; display:flex; flex-direction:column; align-items:center; justify-content:center; overflow:hidden; user-select:none; transition:opacity 0.2s ease-out; opacity:0;';
+
+  // (2026-07-13) Deep 6x pinch zoom, 4x double-tap & pan drag; prev: 2.2x scale
+  let zoomScale = 1;
+  let translateX = 0, translateY = 0;
+  let initialPinchDist = 0;
+  let initialScale = 1;
+  let isDragging = false;
+  let dragStartX = 0, dragStartY = 0;
+  let initialTranslateX = 0, initialTranslateY = 0;
+  let isAlbumVisible = true;
+  let lastTapTime = 0;
+  let tapTimer = null;
+
+  function updateZoomTransform(){
+    const zoomImg = fullModal.querySelector('#fullscreenZoomImg');
+    if(zoomImg){
+      zoomImg.style.transform = `translate(${translateX}px, ${translateY}px) scale(${zoomScale})`;
+    }
+  }
+
+  function renderFullscreenContent(slideDir = ''){
+    zoomScale = 1; translateX = 0; translateY = 0;
+    const e = log[currentIndex];
+    const prevPhoto = currentIndex > 0 ? log[currentIndex - 1] : null;
+    const nextPhoto = currentIndex < log.length - 1 ? log[currentIndex + 1] : null;
+
+    const animClass = slideDir === 'left' ? 'animate-slide-left' : slideDir === 'right' ? 'animate-slide-right' : 'animate-fade-in';
+
+    fullModal.innerHTML = `
+      <div id="fullscreenHeaderBar" style="position:absolute !important; top:max(16px, env(safe-area-inset-top)) !important; left:0 !important; right:0 !important; width:100% !important; z-index:100 !important; transition:all 0.25s ease-out; opacity:${isAlbumVisible?1:0}; transform:translateY(${isAlbumVisible?0:-30}px); pointer-events:${isAlbumVisible?'auto':'none'};" class="px-4 flex items-center justify-between text-white">
+        <div class="flex items-center gap-2.5">
+          <span class="text-[12px] font-semibold bg-white/20 backdrop-blur-md px-3 py-1 rounded-full border border-white/20 text-white shadow-sm">${currentIndex + 1} of ${log.length}</span>
+          <span class="text-[13px] font-semibold text-white/90 drop-shadow-md truncate max-w-[180px]">${e.towerName} · ${e.variety}</span>
+        </div>
+        <button id="fullscreenZoomClose" type="button" class="w-9 h-9 rounded-full bg-black/60 backdrop-blur-md hover:bg-black/80 active:scale-95 flex items-center justify-center text-white font-bold text-[18px] transition-all border border-white/20 shadow-md">✕</button>
+      </div>
+
+      <div id="zoomImgWrapper" class="w-full h-full relative flex items-center justify-center overflow-hidden cursor-pointer ${animClass}">
+        ${prevPhoto ? `<img src="${prevPhoto.dataUrl}" style="position:absolute !important; left:-86% !important; top:10% !important; width:82% !important; height:80% !important; object-fit:contain !important; opacity:0.3 !important; filter:brightness(0.5) !important;" class="pointer-events-none" alt="prev preview">` : ''}
+        <img id="fullscreenZoomImg" src="${e.dataUrl}" style="width:100% !important; height:auto !important; max-height:100vh !important; object-fit:contain !important; transition:transform 0.25s ease-out; transform:translate(${translateX}px, ${translateY}px) scale(${zoomScale});" class="block relative z-10" alt="Fullscreen zoom photo">
+        ${nextPhoto ? `<img src="${nextPhoto.dataUrl}" style="position:absolute !important; right:-86% !important; top:10% !important; width:82% !important; height:80% !important; object-fit:contain !important; opacity:0.3 !important; filter:brightness(0.5) !important;" class="pointer-events-none" alt="next preview">` : ''}
+      </div>
+
+      <div id="fullscreenAlbumBar" style="position:absolute !important; bottom:max(12px, env(safe-area-inset-bottom)) !important; left:0 !important; right:0 !important; width:100% !important; z-index:100 !important; transition:all 0.25s ease-out; opacity:${isAlbumVisible?1:0}; transform:translateY(${isAlbumVisible?0:30}px); pointer-events:${isAlbumVisible?'auto':'none'};" class="px-4">
+        <div class="bg-black/60 backdrop-blur-xl rounded-2xl p-1.5 max-w-sm mx-auto flex items-center justify-center gap-1.5 overflow-x-auto scrollbar-none">
+          ${log.map((item, idx) => `
+            <button data-album-idx="${idx}" type="button" style="width:36px !important; height:36px !important; min-width:36px !important; min-height:36px !important; aspect-ratio:1/1 !important;" class="rounded-lg overflow-hidden flex-shrink-0 border-2 transition-all ${idx===currentIndex ? 'border-emerald-400 scale-105 shadow-md ring-1 ring-emerald-400/50' : 'border-white/30 opacity-50 hover:opacity-100'}">
+              <img src="${item.dataUrl}" style="width:100% !important; height:100% !important; object-fit:cover !important; object-position:center !important;" class="block" alt="album thumbnail ${idx+1}">
+            </button>
+          `).join('')}
+        </div>
+      </div>
+    `;
+
+    const closeBtn = fullModal.querySelector('#fullscreenZoomClose');
+    if(closeBtn){
+      closeBtn.onclick = (ev) => {
+        ev.stopPropagation();
+        fullModal.style.opacity = '0';
+        setTimeout(()=>fullModal.remove(), 200);
+      };
+    }
+
+    fullModal.querySelectorAll('[data-album-idx]').forEach(btn => {
+      btn.onclick = (ev) => {
+        ev.stopPropagation();
+        const targetIdx = Number(btn.dataset.albumIdx);
+        if(targetIdx !== currentIndex){
+          const dir = targetIdx > currentIndex ? 'left' : 'right';
+          currentIndex = targetIdx;
+          renderFullscreenContent(dir);
+        }
+      };
+    });
+
+    // Auto-scroll to center the active thumbnail
+    const scrollToActiveThumb = () => {
+      const albumBar = fullModal.querySelector('#fullscreenAlbumBar');
+      if(!albumBar) return;
+      
+      const scrollContainer = albumBar.querySelector('.overflow-x-auto');
+      if(!scrollContainer) return;
+      
+      const activeThumb = scrollContainer.querySelector(`[data-album-idx="${currentIndex}"]`);
+      if(!activeThumb) return;
+      
+      const containerWidth = scrollContainer.clientWidth;
+      const thumbLeft = activeThumb.offsetLeft;
+      const thumbWidth = activeThumb.clientWidth;
+      
+      // Calculate position to center the thumbnail
+      const scrollPosition = thumbLeft - (containerWidth / 2) + (thumbWidth / 2);
+      
+      scrollContainer.scrollTo({
+        left: scrollPosition,
+        behavior: 'smooth'
+      });
+    };
+    
+    // Scroll to active thumbnail on initial render and after content changes
+    setTimeout(scrollToActiveThumb, 100);
+
+    const wrapper = fullModal.querySelector('#zoomImgWrapper');
+
+    if(wrapper){
+      wrapper.onclick = () => {
+        const now = Date.now();
+        if(now - lastTapTime < 300){
+          if(tapTimer) clearTimeout(tapTimer);
+          if(zoomScale > 1){
+            zoomScale = 1;
+            translateX = 0;
+            translateY = 0;
+          } else {
+            zoomScale = 4.0;
+          }
+          updateZoomTransform();
+        } else {
+          tapTimer = setTimeout(() => {
+            isAlbumVisible = !isAlbumVisible;
+            const albumBar = fullModal.querySelector('#fullscreenAlbumBar');
+            const headerBar = fullModal.querySelector('#fullscreenHeaderBar');
+            if(albumBar){
+              albumBar.style.opacity = isAlbumVisible ? '1' : '0';
+              albumBar.style.transform = `translateY(${isAlbumVisible ? 0 : 30}px)`;
+              albumBar.style.pointerEvents = isAlbumVisible ? 'auto' : 'none';
+            }
+            if(headerBar){
+              headerBar.style.opacity = isAlbumVisible ? '1' : '0';
+              headerBar.style.transform = `translateY(${isAlbumVisible ? 0 : -30}px)`;
+              headerBar.style.pointerEvents = isAlbumVisible ? 'auto' : 'none';
+            }
+          }, 300);
+        }
+        lastTapTime = now;
+      };
+
+      let startX = 0, startY = 0;
+      wrapper.addEventListener('touchstart', (ev) => {
+        if(ev.touches.length === 2){
+          initialPinchDist = Math.hypot(
+            ev.touches[0].clientX - ev.touches[1].clientX,
+            ev.touches[0].clientY - ev.touches[1].clientY
+          );
+          initialScale = zoomScale;
+        } else if(ev.touches.length === 1){
+          startX = ev.touches[0].clientX;
+          startY = ev.touches[0].clientY;
+          if(zoomScale > 1){
+            isDragging = true;
+            dragStartX = ev.touches[0].clientX;
+            dragStartY = ev.touches[0].clientY;
+            initialTranslateX = translateX;
+            initialTranslateY = translateY;
+          }
+        }
+      }, { passive: true });
+
+      wrapper.addEventListener('touchmove', (ev) => {
+        if(ev.touches.length === 2 && initialPinchDist > 0){
+          const currentDist = Math.hypot(
+            ev.touches[0].clientX - ev.touches[1].clientX,
+            ev.touches[0].clientY - ev.touches[1].clientY
+          );
+          const factor = currentDist / initialPinchDist;
+          zoomScale = Math.min(6.0, Math.max(1.0, initialScale * factor));
+          if(zoomScale === 1){ translateX = 0; translateY = 0; }
+          updateZoomTransform();
+        } else if(ev.touches.length === 1 && isDragging && zoomScale > 1){
+          translateX = initialTranslateX + (ev.touches[0].clientX - dragStartX);
+          translateY = initialTranslateY + (ev.touches[0].clientY - dragStartY);
+          updateZoomTransform();
+        }
+      }, { passive: true });
+
+      wrapper.addEventListener('touchend', (ev) => {
+        isDragging = false;
+        initialPinchDist = 0;
+        if(ev.changedTouches.length === 1){
+          const deltaX = ev.changedTouches[0].clientX - startX;
+          const deltaY = ev.changedTouches[0].clientY - startY;
+
+          if(zoomScale === 1 && deltaY > 120 && deltaY > Math.abs(deltaX)){
+            fullModal.style.opacity = '0';
+            fullModal.style.transform = 'translateY(100%)';
+            fullModal.style.transition = 'all 0.25s ease-out';
+            setTimeout(()=>fullModal.remove(), 250);
+            return;
+          }
+
+          if(zoomScale === 1 && Math.abs(deltaX) > 40 && Math.abs(deltaX) > Math.abs(deltaY)){
+            if(deltaX < 0 && currentIndex < log.length - 1){
+              currentIndex++;
+              renderFullscreenContent('left');
+            } else if(deltaX > 0 && currentIndex > 0){
+              currentIndex--;
+              renderFullscreenContent('right');
+            }
+          }
+        }
+      }, { passive: true });
+    }
+  }
+
+  document.body.appendChild(fullModal);
+  requestAnimationFrame(()=>{ fullModal.style.opacity = '1'; });
+  renderFullscreenContent();
+}
+
 document.getElementById('towerSearch')?.addEventListener('input', ()=>renderTower());
-// (2026-07-13) Position pocket number above plus icon; prev: overlapping center
+
+// (2026-07-13) Support uploading up to 5 photos at once; prev: single file
+document.getElementById('galleryPhotoInput')?.addEventListener('change', (e)=>{
+  const files = Array.from(e.target.files || []).slice(0, 5);
+  if(files.length === 0) return;
+
+  const towerId = state.activeTowerId;
+  const tower = state.towers.find(t=>t.id===towerId);
+  const activePockets = state.pockets.filter(p=>p.variety && state.rows.find(r=>r.id===p.rowId && r.towerId===towerId));
+  const p = activePockets[0] || null;
+  const row = p ? state.rows.find(r=>r.id===p.rowId) : null;
+  const { stage, day } = p ? getPocketState(p) : { stage:null, day:0 };
+
+  // (2026-07-13) Dark blur backdrop & Okay button for upload modal; prev: plain
+  let doneCount = 0;
+  let autoCloseTimer = null;
+  let progressModal = document.getElementById('photoUploadProgressModal');
+  if(progressModal) progressModal.remove();
+
+  progressModal = document.createElement('div');
+  progressModal.id = 'photoUploadProgressModal';
+  progressModal.style.cssText = 'position:fixed !important; top:0 !important; left:0 !important; right:0 !important; bottom:0 !important; width:100vw !important; height:100vh !important; z-index:9999999 !important; background:rgba(20,30,24,0.75) !important; backdrop-filter:blur(12px) !important; opacity:0; transition:opacity 0.2s ease-out;';
+  progressModal.className = 'flex items-center justify-center p-4';
+  progressModal.innerHTML = `
+    <div class="bg-white rounded-2xl p-6 shadow-2xl max-w-[320px] w-full flex flex-col items-center text-center border border-line/20" style="animation: modalPopIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;">
+      <div id="photoUploadThumbnail" class="w-24 h-24 rounded-xl overflow-hidden mb-4 bg-cream border-2 border-line/30 flex items-center justify-center" style="min-height:96px; max-height:96px; min-width:96px; max-width:96px;">
+        <svg class="w-10 h-10 text-ink-soft/30" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+          <circle cx="8.5" cy="8.5" r="1.5"/>
+          <polyline points="21 15 16 10 5 21"/>
+        </svg>
+      </div>
+      <div id="photoUploadIconContainer" class="mb-3">
+        <svg class="animate-spin w-8 h-8 text-forest" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+      </div>
+      <h3 id="photoUploadTitle" class="font-display font-bold text-[20px] text-forest leading-tight mb-2">Uploading Photos...</h3>
+      <p id="photoUploadSub" class="text-[13px] text-ink-soft/70 mb-5 leading-relaxed">Processing images</p>
+      <button id="photoUploadOkBtn" type="button" class="w-full bg-forest hover:bg-forest/90 active:scale-[0.98] text-white font-bold text-[17px] py-4 rounded-xl shadow-lg transition-all hidden">
+        Okay
+      </button>
+    </div>
+  `;
+  document.body.appendChild(progressModal);
+  
+  // Fade in the modal
+  requestAnimationFrame(() => {
+    progressModal.style.opacity = '1';
+  });
+
+  const barEl = null; // Progress bar removed
+  const pctEl = null; // Percentage removed
+  const iconContainer = progressModal.querySelector('#photoUploadIconContainer');
+  const titleEl = progressModal.querySelector('#photoUploadTitle');
+  const subEl = progressModal.querySelector('#photoUploadSub');
+  const okBtn = progressModal.querySelector('#photoUploadOkBtn');
+  const thumbnailEl = progressModal.querySelector('#photoUploadThumbnail');
+
+  const closeUploadModal = () => {
+    if(autoCloseTimer) clearTimeout(autoCloseTimer);
+    progressModal.style.opacity = '0';
+    progressModal.style.transition = 'opacity 0.2s ease-out';
+    setTimeout(()=>progressModal.remove(), 200);
+  };
+
+  if(okBtn) okBtn.onclick = closeUploadModal;
+
+  // Process files with compression (no fake animation delay)
+  let processedCount = 0;
+  const totalFiles = files.length;
+
+  files.forEach(async (file, idx)=>{
+    try {
+      // Show first image thumbnail (with object-fit to prevent stretching)
+      if(idx === 0 && thumbnailEl){
+        const previewReader = new FileReader();
+        previewReader.onload = (e) => {
+          thumbnailEl.innerHTML = `<img src="${e.target.result}" class="w-full h-full" style="object-fit:cover; object-position:center; min-height:96px; max-height:96px; min-width:96px; max-width:96px;" alt="upload preview">`;
+        };
+        previewReader.readAsDataURL(file);
+      }
+
+      // Compress image (max 1200px width, 80% quality)
+      const compressedDataUrl = await compressImage(file, 1200, 0.8);
+
+      const currentBatchSummary = getTowerCropSummary({ towerId });
+      const entry = {
+        id: 'ph_' + Date.now() + '_' + idx + '_' + Math.random().toString(36).substring(2,6),
+        dataUrl: compressedDataUrl,
+        towerId,
+        towerName: tower?.name || 'Tower',
+        pocketId: p?.id || '—',
+        rowLabel: row ? `Row ${state.rows.indexOf(row)+1}` : '—',
+        variety: p?.variety || 'Tower General',
+        health: p?.health || 'healthy',
+        stage: stage?.label || 'N/A',
+        stageKey: stage?.key || '',
+        day: day || 0,
+        datePlanted: p?.datePlanted || null,
+        cropSummary: currentBatchSummary.cropSummary,
+        healthKey: currentBatchSummary.healthKey,
+        healthLabel: currentBatchSummary.healthLabel,
+        healthColor: currentBatchSummary.healthColor,
+        loggedAt: new Date().toISOString(),
+        dateLabel: new Date().toLocaleDateString('en-PH',{year:'numeric',month:'long',day:'numeric'})
+      };
+      
+      if(!state.photoLog) state.photoLog = [];
+      state.photoLog.unshift(entry);
+      processedCount++;
+
+      // (2026-07-13) Sync each photo to separate Firestore document
+      if(typeof cloudSync !== 'undefined' && cloudSync.connected){
+        cloudSync.syncPhoto(entry).catch(err => console.error('Photo sync error:', err));
+      }
+
+      // When all files are done processing, show success immediately
+      if(processedCount === totalFiles){
+        if(state.photoLog.length > 100) state.photoLog = state.photoLog.slice(0,100);
+        persist('photoLog');
+        renderTowerPhotoGallery();
+
+        // Success state
+        if(thumbnailEl){
+          thumbnailEl.className = 'w-24 h-24 rounded-xl overflow-hidden mb-4 bg-forest/10 border-2 border-forest/30 flex items-center justify-center relative';
+          thumbnailEl.style.cssText = 'min-height:96px; max-height:96px; min-width:96px; max-width:96px;';
+          const checkIcon = document.createElement('div');
+          checkIcon.className = 'absolute inset-0 bg-forest/90 flex items-center justify-center';
+          checkIcon.innerHTML = `<svg class="w-12 h-12 text-white" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+          thumbnailEl.appendChild(checkIcon);
+        }
+        if(iconContainer){
+          iconContainer.innerHTML = '';
+          iconContainer.style.display = 'none';
+        }
+        if(titleEl){
+          titleEl.className = 'font-display font-bold text-[20px] text-forest leading-tight mb-2';
+          titleEl.innerHTML = `<span style="display:inline-block; margin-right:8px;">✓</span>Upload Successful!`;
+        }
+        if(subEl){
+          subEl.className = 'text-[13px] text-ink-soft/70 mb-5 leading-relaxed';
+          subEl.textContent = 'Photo saved to Tower Growth History';
+        }
+        if(okBtn){
+          okBtn.classList.remove('hidden');
+          okBtn.style.display = 'block';
+        }
+        showToast(`Uploaded ${totalFiles} photo(s) to Tower History`, 'forest', 'camera');
+        e.target.value = '';
+
+        autoCloseTimer = setTimeout(()=>{
+          closeUploadModal();
+        }, 2500);
+      }
+    } catch(err){
+      console.error('Image compression failed:', err);
+      processedCount++;
+    }
+  });
+});
+// (2026-07-13) Use SVG icons and yellow/red borders for pocket chip health; prev: emojis
 function pocketChipHTML(p){
   const {status, day, stage} = getPocketState(p);
   const stageKey = stage ? stage.key : 'empty';
-  return `<button data-pocket-chip="${p.id}" class="pocket-chip status-${status} flex flex-col items-center justify-between p-2 flex-shrink-0 shadow-sm">
+  const health = p.health || 'healthy';
+  const healthBadge = p.variety && health==='unhealthy' ? `<span class="absolute top-0.5 right-0.5">${icon('alert-triangle','w-3 h-3 text-[#D97706]',12)}</span>` : p.variety && health==='dead' ? `<span class="absolute top-0.5 right-0.5">${icon('x-circle','w-3 h-3 text-[#DC2626]',12)}</span>` : '';
+  const healthBorder = p.variety && health==='unhealthy' ? 'ring-2 ring-[#F59E0B] bg-[#FEF3C7]/40' : p.variety && health==='dead' ? 'ring-2 ring-[#EF4444] bg-[#FEE2E2]/40 opacity-75' : '';
+  return `<button data-pocket-chip="${p.id}" class="pocket-chip status-${status} ${healthBorder} relative flex flex-col items-center justify-between p-2 flex-shrink-0 shadow-sm">
+    ${healthBadge}
     <span class="text-[11px] font-mono font-bold text-ink-soft/90 pt-0.5">#${p.id}</span>
     <span class="my-auto">${plantIcon(status==='empty'?'empty':stageKey, 26)}</span>
     <span class="text-[9.5px] font-semibold text-ink-soft leading-none pb-0.5">${p.variety ? ('D'+day) : '—'}</span>
@@ -1027,15 +2468,32 @@ function openRowModal(rowId){
     pockets.forEach(p=>{ p.variety=null; p.datePlanted=null; p.override=null; });
     persist('pockets'); closeModal('rowModal'); renderTower();
   });
-  document.getElementById('btnDeleteRow').addEventListener('click', async ()=>{
-    if(state.rows.length<=1){ showToast('You need at least one row','clay','alert-triangle'); return; }
-    if(!await showConfirm(`Delete ${rowLabel(row)} and its ${pockets.length} pockets? This can't be undone.`, 'Delete Row')) return;
-    state.pockets = state.pockets.filter(p=>p.rowId!==rowId);
-    state.rows = state.rows.filter(r=>r.id!==rowId);
-    persist('pockets'); persist('rows'); closeModal('rowModal'); renderTower();
-    showToast('Row deleted','clay','trash-2');
-  });
+  // (2026-07-13) Standalone row deletion helper; prev: inline modal logic
+  document.getElementById('btnDeleteRow').addEventListener('click', ()=>deleteRow(rowId));
   document.getElementById('rowModal').classList.remove('hidden');
+}
+
+async function deleteRow(rowId){
+  const row = state.rows.find(r=>r.id===rowId);
+  if(!row) return;
+  const towerRows = state.rows.filter(r=>(r.towerId||'t1')===(row.towerId||'t1'));
+  const rowIndex = towerRows.findIndex(r=>r.id===rowId);
+  // (2026-07-13) Min 3 rows protected for horizontal towers, 8 for vertical; prev: 8 fixed
+  const activeTower = state.towers.find(t=>t.id===(row.towerId||'t1')) || getActiveTower();
+  const minRows = activeTower.type === 'horizontal' ? 3 : 8;
+  if(rowIndex < minRows || towerRows.length <= minRows){
+    showToast(`The first ${minRows} rows of the tower cannot be deleted`,'clay','alert-triangle');
+    return;
+  }
+  const pockets = state.pockets.filter(p=>p.rowId===rowId);
+  if(!await showConfirm(`Delete ${rowLabel(row)} and its ${pockets.length} pockets? This can't be undone.`, 'Delete Row')) return;
+  state.pockets = state.pockets.filter(p=>p.rowId!==rowId);
+  state.rows = state.rows.filter(r=>r.id!==rowId);
+  persist('pockets'); persist('rows');
+  const modal = document.getElementById('rowModal');
+  if(modal && !modal.classList.contains('hidden')) closeModal('rowModal');
+  renderTower();
+  showToast('Row deleted','clay','trash-2');
 }
 
 // (2026-07-13) Support type, custom rows (default 8) & cols in newTowerForm
@@ -1083,18 +2541,39 @@ document.getElementById('newTowerForm')?.addEventListener('submit', (e)=>{
   showToast(`Created ${name} with ${rowCount} rows`,'forest','plus');
 });
 
+// (2026-07-13) Disallow deleting default Main Tower; prev: deletable if multi-tower
 document.getElementById('btnRenameTower')?.addEventListener('click', ()=>{
   const activeTower = getActiveTower();
   document.getElementById('renameTowerInput').value = activeTower.name;
-  document.getElementById('deleteTowerHint')?.classList.toggle('hidden', state.towers.length>1);
-  document.getElementById('btnDeleteTower')?.toggleAttribute('disabled', state.towers.length<=1);
-  document.getElementById('btnDeleteTower')?.classList.toggle('opacity-40', state.towers.length<=1);
-  document.getElementById('btnDeleteTower')?.classList.toggle('pointer-events-none', state.towers.length<=1);
+  const isMainTower = activeTower.id === 't1' || (activeTower.name && activeTower.name.toLowerCase() === 'main tower');
+  const deleteBtn = document.getElementById('btnDeleteTower');
+  const deleteHint = document.getElementById('deleteTowerHint');
+  if(isMainTower){
+    deleteBtn?.classList.add('hidden');
+    if(deleteHint){
+      deleteHint.textContent = 'The default Main Tower cannot be deleted.';
+      deleteHint.classList.remove('hidden');
+    }
+  } else {
+    deleteBtn?.classList.remove('hidden');
+    const canDelete = state.towers.length > 1;
+    deleteBtn?.toggleAttribute('disabled', !canDelete);
+    deleteBtn?.classList.toggle('opacity-40', !canDelete);
+    deleteBtn?.classList.toggle('pointer-events-none', !canDelete);
+    if(deleteHint){
+      deleteHint.textContent = 'You need at least one tower — add another before deleting this one.';
+      deleteHint.classList.toggle('hidden', canDelete);
+    }
+  }
   document.getElementById('renameTowerModal').classList.remove('hidden');
 });
 document.getElementById('btnDeleteTower')?.addEventListener('click', ()=>{
-  if(state.towers.length<=1) return;
   const activeTower = getActiveTower();
+  const isMainTower = activeTower.id === 't1' || (activeTower.name && activeTower.name.toLowerCase() === 'main tower');
+  if(isMainTower || state.towers.length<=1){
+    showToast('The Main Tower cannot be deleted','clay','alert-triangle');
+    return;
+  }
   if(!confirm(`Delete "${activeTower.name}" and every row and pocket in it? This can't be undone.`)) return;
   const snapshotTowers = JSON.parse(JSON.stringify(state.towers));
   const snapshotRows = JSON.parse(JSON.stringify(state.rows));
@@ -1134,23 +2613,23 @@ document.getElementById('renameTowerForm')?.addEventListener('submit', (e)=>{
 });
 
 /* ---- Add Row ---- */
+// (2026-07-13) Direct row add without modal; prev: opened addRowModal
 document.getElementById('btnAddRow').addEventListener('click', ()=>{
   const activeTower = getActiveTower();
-  document.getElementById('addRowCount').value = activeTower.type==='horizontal' ? 8 : 3;
-  document.getElementById('addRowModal').classList.remove('hidden');
-});
-document.getElementById('addRowForm').addEventListener('submit', (e)=>{
-  e.preventDefault();
-  const activeTower = getActiveTower();
-  const count = Math.max(1, Math.min(16, Number(document.getElementById('addRowCount').value)||3));
+  const towerRows = state.rows.filter(r=>(r.towerId||'t1')===activeTower.id);
+  // Derive pocket count from existing rows; fallback 3 for vertical, 8 for horizontal
+  const count = towerRows.length > 0
+    ? towerRows[0].potCount
+    : (activeTower.type==='horizontal' ? 8 : 3);
   const newRow = { id: uid(), towerId: activeTower.id, potCount: count };
   state.rows.push(newRow);
   const maxId = state.pockets.reduce((m,p)=>Math.max(m,p.id),0);
   for(let i=0;i<count;i++) state.pockets.push({ id:maxId+i+1, rowId:newRow.id, variety:null, datePlanted:null, override:null });
   persist('rows'); persist('pockets');
-  closeModal('addRowModal'); renderTower();
+  renderTower();
   showToast(`${rowLabel(newRow)} added with ${count} pockets`,'forest','list-plus');
 });
+document.getElementById('addRowForm')?.addEventListener('submit', (e)=>{ e.preventDefault(); closeModal('addRowModal'); });
 
 // (2026-07-13) Fix pocket lookup using string matching; prev: strict x.id===id
 function openPocketModal(id){
@@ -1188,6 +2667,9 @@ function openPocketModal(id){
     const idx = stageIndex(stage.key);
     const progressPct = Math.min(100, Math.round((day/45)*100));
     const est = nextTransitionInfo(day, stage);
+    // (2026-07-13) Normalize health so single-tap works from fresh pocket; prev: !p.health fallback
+    if(!p.health) p.health = 'healthy';
+    const ph = p.health;
     body.innerHTML = `
       <div class="flex items-center gap-3 mb-4 bg-cream rounded-xl p-3">
         <div class="flex-shrink-0">${plantIcon(stage.key,56)}</div>
@@ -1209,6 +2691,15 @@ function openPocketModal(id){
         ${icon('timer','w-4 h-4 text-[#8a6a12] flex-shrink-0',18)}
         <div class="text-[12px] text-[#8a6a12]">${est.done ? `<strong>Harvest window is open</strong> — pick whenever ready.` : `Next: <strong>${est.label}</strong> in ${est.daysUntil===0?'today':est.daysUntil+' day(s)'} <span class="opacity-70">(${fmtDate(est.date)})</span>`}</div>
       </div>
+      <!-- (2026-07-13) Health buttons: all 3 get bg when active; prev: partial styling -->
+      <div class="mb-4">
+        <label class="text-[12px] font-semibold text-ink-soft mb-1.5 block">Plant Condition / Health</label>
+        <div class="grid grid-cols-3 gap-2">
+          <button id="btnPocketHealthHealthy" class="py-2.5 px-1 text-[12.5px] rounded-xl border flex items-center justify-center gap-1.5 transition-all ${ph==='healthy'?'bg-[#DCFCE7] border-[#22C55E] text-[#15803D] font-semibold shadow-sm':'border-line text-ink-soft'}">${icon('circle-check','w-4 h-4',16)} Healthy</button>
+          <button id="btnPocketHealthUnhealthy" class="py-2.5 px-1 text-[12.5px] rounded-xl border flex items-center justify-center gap-1.5 transition-all ${ph==='unhealthy'?'bg-[#FEF3C7] border-[#F59E0B] text-[#92400E] font-semibold shadow-sm':'border-line text-ink-soft'}">${icon('alert-triangle','w-4 h-4',16)} Unhealthy</button>
+          <button id="btnPocketHealthDead" class="py-2.5 px-1 text-[12.5px] rounded-xl border flex items-center justify-center gap-1.5 transition-all ${ph==='dead'?'bg-[#FEE2E2] border-[#EF4444] text-[#991B1B] font-semibold shadow-sm':'border-line text-ink-soft'}">${icon('x-circle','w-4 h-4',16)} Dead</button>
+        </div>
+      </div>
       <div class="grid grid-cols-2 gap-2.5 mb-3">
         <button id="btnAdvanceStage" class="text-[13px] font-semibold text-forest bg-mint rounded-lg py-2.5 flex items-center justify-center gap-1.5" ${idx>=STAGES.length-1?'disabled':''}>${icon('arrow-right-circle','w-4 h-4',16)} Advance Stage</button>
         <button id="btnHarvestPocket" class="text-[13px] font-semibold text-white bg-gold rounded-lg py-2.5 flex items-center justify-center gap-1.5">${icon('scissors','w-4 h-4',16)} Harvest</button>
@@ -1218,54 +2709,26 @@ function openPocketModal(id){
         <button id="btnClearPocket" class="text-[12.5px] font-medium text-clay bg-[#FCEBD8] rounded-lg py-2.5 flex items-center justify-center gap-1.5">${icon('trash-2','w-4 h-4',16)} Clear Pocket</button>
       </div>`;
 
+    const setPocketHealth = (h)=>{
+      p.health = h;
+      logActivityNotification('⚠️ Plant Health Updated', `Pocket #${id} (${p.variety}) marked as ${h}`, 'alert-triangle');
+      persist('pockets'); openPocketModal(id); renderTower();
+      showToast(`Pocket #${id} marked as ${h}`,'forest','sprout');
+    };
+    document.getElementById('btnPocketHealthHealthy')?.addEventListener('click', ()=>setPocketHealth('healthy'));
+    document.getElementById('btnPocketHealthUnhealthy')?.addEventListener('click', ()=>setPocketHealth('unhealthy'));
+    document.getElementById('btnPocketHealthDead')?.addEventListener('click', ()=>setPocketHealth('dead'));
+
     document.getElementById('btnAdvanceStage').addEventListener('click', ()=>{
       p.override = Math.min(STAGES.length-1, idx+1);
       persist('pockets'); openPocketModal(id); renderTower();
       showToast(`Pocket #${id} advanced to ${STAGES[p.override].label}`,'forest','arrow-right-circle');
     });
     document.getElementById('btnHarvestPocket').addEventListener('click', ()=>{ closeModal('pocketModal'); openHarvestModal(p); });
-    // (2026-07-13) Bi-directional tower-to-tray reversion logic; prev: none
+    // (2026-07-13) Open target tray selector modal on Return to Tray; prev: auto tray
     document.getElementById('btnReturnToTray')?.addEventListener('click', ()=>{
-      const snapshotPockets = JSON.parse(JSON.stringify(state.pockets));
-      const snapshotTrays = JSON.parse(JSON.stringify(state.trays));
-      
-      let targetTray = state.trays.find(t=>t.variety===p.variety);
-      if(!targetTray && state.trays.length>0) targetTray = state.trays[0];
-      if(!targetTray){
-        targetTray = {
-          id: 'tr_' + Date.now(),
-          variety: p.variety || 'Seedlings',
-          startDate: p.datePlanted || new Date().toISOString().split('T')[0],
-          gridRows: 3,
-          gridCols: 4,
-          count: 0
-        };
-        state.trays.push(targetTray);
-      }
-
-      const cells = getTrayCells(targetTray);
-      const emptyCell = cells.find(c=>!c.filled);
-      if(!emptyCell){
-        showToast('No empty cells available in tray!', 'clay', 'alert-triangle');
-        return;
-      }
-
-      emptyCell.filled = true;
-      targetTray.count = cells.filter(c=>c.filled).length;
-
-      const plantName = p.variety || 'Plant';
-      p.variety = null; p.datePlanted = null; p.override = null;
-
-      persist('pockets'); persist('trays');
       closeModal('pocketModal');
-      renderTower(); renderNursery();
-
-      triggerUndoSnackbar(`Returned ${plantName} to tray cell [${emptyCell.id}]`, ()=>{
-        state.pockets = snapshotPockets;
-        state.trays = snapshotTrays;
-        persist('pockets'); persist('trays');
-        renderTower(); renderNursery();
-      });
+      openReturnTrayModal(id);
     });
     document.getElementById('btnClearPocket').addEventListener('click', ()=>{
       const snapshotPockets = JSON.parse(JSON.stringify(state.pockets));
@@ -1280,10 +2743,79 @@ function openPocketModal(id){
   }
   document.getElementById('pocketModal').classList.remove('hidden');
 }
-function closeModal(id){ document.getElementById(id).classList.add('hidden'); }
+
+// (2026-07-13) Modal to select target tray and cell for reversion; prev: auto tray
+function openReturnTrayModal(pocketId){
+  const p = state.pockets.find(x=>String(x.id)===String(pocketId));
+  if(!p || !p.variety) return;
+  
+  const selectEl = document.getElementById('returnTargetTraySelect');
+  if(!selectEl) return;
+  if(state.trays.length === 0){
+    showToast('No seedling nursery trays available!', 'clay', 'alert-triangle');
+    return;
+  }
+  
+  selectEl.innerHTML = state.trays.map(t=>`<option value="${t.id}">${t.variety} (${t.count} cells filled)</option>`).join('');
+  
+  const renderCellGrid = ()=>{
+    const targetTray = state.trays.find(t=>t.id===selectEl.value) || state.trays[0];
+    const cells = getTrayCells(targetTray);
+    const gridEl = document.getElementById('returnTrayCellGrid');
+    if(!gridEl) return;
+    const cols = targetTray.gridCols || 4;
+    gridEl.style.display = 'grid';
+    gridEl.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+    gridEl.style.gap = '6px';
+    gridEl.innerHTML = cells.map((c, i)=>`
+      <div class="aspect-square rounded-md text-[10px] font-mono flex items-center justify-center border transition-all ${c.filled ? 'bg-line/40 text-ink-soft opacity-50' : 'bg-mint/40 border-forest text-forest font-bold'}">
+        ${c.id}
+      </div>`).join('');
+  };
+  
+  selectEl.onchange = renderCellGrid;
+  renderCellGrid();
+
+  document.getElementById('btnConfirmReturnToTray').onclick = ()=>{
+    const targetTray = state.trays.find(t=>t.id===selectEl.value) || state.trays[0];
+    const cells = getTrayCells(targetTray);
+    const emptyCell = cells.find(c=>!c.filled);
+    if(!emptyCell){
+      showToast('Selected tray has no empty cells!', 'clay', 'alert-triangle');
+      return;
+    }
+    const snapshotPockets = JSON.parse(JSON.stringify(state.pockets));
+    const snapshotTrays = JSON.parse(JSON.stringify(state.trays));
+    
+    emptyCell.filled = true;
+    targetTray.count = cells.filter(c=>c.filled).length;
+    const plantName = p.variety;
+    p.variety = null; p.datePlanted = null; p.override = null; delete p.photo;
+    
+    persist('pockets'); persist('trays');
+    closeModal('returnTrayModal');
+    renderTower(); renderNursery();
+    logActivityNotification('↩️ Returned to Tray', `Returned ${plantName} to tray "${targetTray.variety}" cell [${emptyCell.id}]`, 'move-left');
+    triggerUndoSnackbar(`Returned ${plantName} to tray cell [${emptyCell.id}]`, ()=>{
+      state.pockets = snapshotPockets; state.trays = snapshotTrays;
+      persist('pockets'); persist('trays');
+      renderTower(); renderNursery();
+    });
+  };
+  
+  document.getElementById('returnTrayModal').classList.remove('hidden');
+}
+
+// (2026-07-13) Unselect plant on tray when closing plant modal; prev: modal hide only
+function closeModal(id){
+  const el = document.getElementById(id);
+  if(el) el.classList.add('hidden');
+  if(id === 'trayCellModal' || id === 'pocketModal') trayCellClearSelection();
+}
 // (2026-07-13) Add newTowerModalClose and renameTowerModalClose handlers
 document.getElementById('newTowerModalClose')?.addEventListener('click', ()=>closeModal('newTowerModal'));
 document.getElementById('renameTowerModalClose')?.addEventListener('click', ()=>closeModal('renameTowerModal'));
+document.getElementById('returnTrayModalClose')?.addEventListener('click', ()=>closeModal('returnTrayModal'));
 document.getElementById('pocketModalClose').addEventListener('click', ()=>closeModal('pocketModal'));
 document.getElementById('rowModalClose').addEventListener('click', ()=>closeModal('rowModal'));
 document.getElementById('addRowModalClose').addEventListener('click', ()=>closeModal('addRowModal'));
@@ -1293,7 +2825,12 @@ document.getElementById('expenseModalClose').addEventListener('click', ()=>close
 document.getElementById('harvestModalClose').addEventListener('click', ()=>closeModal('harvestModal'));
 // (2026-07-13) Add reservoirModalClose listener; prev: none
 document.getElementById('reservoirModalClose')?.addEventListener('click', ()=>closeModal('reservoirModal'));
-document.querySelectorAll('.modal-backdrop').forEach(m=>m.addEventListener('click', (e)=>{ if(e.target===m) m.classList.add('hidden'); }));
+document.querySelectorAll('.modal-backdrop').forEach(m=>m.addEventListener('click', (e)=>{
+  if(e.target===m){
+    m.classList.add('hidden');
+    if(m.id === 'trayCellModal' || m.id === 'pocketModal') trayCellClearSelection();
+  }
+}));
 
 /* ================= RESERVOIR & DOSING CALCULATOR ================= */
 // (2026-07-13) Automated Dosing Calculator for pH & SNAP Nutrients; prev: none
@@ -1399,7 +2936,8 @@ function updateReservoirDosingSuggestion(){
 /* ================= NURSERY ================= */
 // (2026-07-13) Define traySelection and drag selection state; prev: syntax error
 const traySelection = { trayId:null, indices:new Set() };
-const tlp = { timer:null, activeTrayId:null, fired:false, dragging:false, startX:0, startY:0 };
+// (2026-07-13) Support drag select and unselect modes on tray cells; prev: select only
+const tlp = { timer:null, activeTrayId:null, fired:false, dragging:false, startX:0, startY:0, mode:'select' };
 function trayCellSelect(trayId, idx){
   if(traySelection.trayId!==trayId){ traySelection.trayId=trayId; traySelection.indices=new Set(); }
   if(!traySelection.indices.has(idx)){
@@ -1407,17 +2945,23 @@ function trayCellSelect(trayId, idx){
     renderNursery();
   }
 }
-// (2026-07-13) Index-based grid state helper for 3x4 seedling tray grid cells; prev: count integer only
+function trayCellDeselect(trayId, idx){
+  if(traySelection.trayId===trayId && traySelection.indices.has(idx)){
+    traySelection.indices.delete(idx);
+    renderNursery();
+  }
+}
+// (2026-07-13) Clamp grid dimensions to max 10; prev: max 20
 function getTrayCells(tray){
-  const rows = tray.gridRows || 3;
-  const cols = tray.gridCols || 4;
+  const rows = Math.min(10, Math.max(1, tray.gridRows || 3));
+  const cols = Math.min(10, Math.max(1, tray.gridCols || 4));
   const total = rows * cols;
   if(!tray.cells || tray.cells.length !== total){
     const filledCount = tray.count !== undefined ? tray.count : total;
     tray.cells = Array.from({ length: total }, (_, i) => {
       const r = Math.floor(i / cols);
       const c = i % cols;
-      return { id: `${r}-${c}`, index: i, filled: i < filledCount };
+      return { id: `${r}-${c}`, index: i, filled: i < filledCount, health: 'healthy' };
     });
   }
   return tray.cells;
@@ -1452,7 +2996,7 @@ function renderNursery(){
     const stage = stageForDay(day);
     const ready = day>=12;
     const est = nextTransitionInfo(day, stage);
-    const cols = t.gridCols || Math.min(6, t.count) || 4;
+    const cols = Math.min(10, Math.max(1, t.gridCols || Math.min(6, t.count) || 4));
     const selectedHere = traySelection.trayId===t.id ? traySelection.indices : new Set();
 
     // (2026-07-13) Upgrade seedling card & rockwool tray grid UI; prev: dark grid
@@ -1483,7 +3027,8 @@ function renderNursery(){
             const segEnd   = segStart + seg.d;
             const fill = Math.min(100, Math.max(0, ((Math.min(day, segEnd) - segStart) / seg.d) * 100));
             const radius = si===0 ? '4px 0 0 4px' : si===3 ? '0 4px 4px 0' : '0';
-            return `<div class="relative overflow-hidden bg-[#E3EAE3]" style="flex:${seg.d};border-radius:${radius};">
+            // (2026-07-13) Visible slate gray for unfilled nursery segments; prev: light gray
+            return `<div class="relative overflow-hidden bg-[#CBD5E1]" style="flex:${seg.d};border-radius:${radius};background-color:#CBD5E1 !important;">
               <div style="height:100%;width:${fill}%;background:${seg.color};border-radius:${radius};transition:width .4s;"></div>
             </div>`;
           }).join('')}
@@ -1500,23 +3045,24 @@ function renderNursery(){
       </div>
       <div class="text-[11.5px] text-ink-soft mb-3 flex items-center gap-1.5 font-medium">${icon('timer','w-3.5 h-3.5 flex-shrink-0 text-forest',14)} ${ready? 'Ready now' : `${est.label} in ${est.daysUntil}d (${fmtDate(est.date)})`}</div>
 
-      <!-- (2026-07-13) Apply dark nursery tray bed & green cell selection classes; prev: Tailwind inline hex -->
-      <div class="rounded-xl p-3 mb-3 nursery-tray-bed">
-        <div class="grid gap-1 sm:gap-1.5 touch-none" style="grid-template-columns:repeat(${cols},1fr)" data-tray-grid="${t.id}"></div>
+      <div class="rounded-xl p-3 mb-3 nursery-tray-bed overflow-auto max-h-[300px]">
+        <div class="grid gap-1 sm:gap-1.5 touch-pan-y" style="grid-template-columns:repeat(${cols},minmax(0,1fr));touch-action:pan-y;" data-tray-grid="${t.id}"></div>
       </div>
 
+      <!-- (2026-07-13) Fix missing closing div & button cramming; prev: unclosed flex div -->
       <div class="flex items-center justify-between mb-3">
-        <button data-tray-select-all="${t.id}" class="text-[12px] font-semibold text-forest hover:text-forest/80 transition-colors">Select all ${t.count}</button>
-        ${selectedHere.size>0 ? `<span class="text-[12px] font-semibold text-forest bg-mint/60 px-2 py-0.5 rounded-md">${selectedHere.size} selected</span>` : ''}
+        <button data-tray-select-all="${t.id}" class="text-[12px] font-semibold text-forest hover:text-forest/80 transition-colors whitespace-nowrap">Select all ${t.count}</button>
+        ${selectedHere.size>0 ? `<span class="text-[12px] font-semibold text-forest bg-mint/60 px-2.5 py-0.5 rounded-md whitespace-nowrap">${selectedHere.size} selected</span>` : ''}
       </div>
-      <div class="flex gap-2 mt-auto">
+      <div class="flex items-center gap-1.5 mt-auto">
         ${selectedHere.size>0
-          ? `<button data-tray-move="${t.id}" class="flex-1 text-[12.5px] font-semibold text-white bg-forest hover:bg-forest/90 rounded-xl py-2.5 flex items-center justify-center gap-1.5 transition-colors shadow-xs">${icon('move-up-right','w-3.5 h-3.5',14)} Move ${selectedHere.size} to Tower</button>
-             <button data-tray-clear-sel="${t.id}" class="text-[12.5px] font-medium text-ink-soft bg-cream hover:bg-cream-dark rounded-xl py-2.5 px-3 transition-colors">${icon('x','w-3.5 h-3.5',14)}</button>`
+          ? `<button data-tray-edit-cell="${t.id}" class="text-[12px] font-semibold text-forest bg-mint hover:bg-mint/80 rounded-xl py-2 px-2.5 transition-colors flex items-center justify-center gap-1 whitespace-nowrap flex-shrink-0">${icon('pencil','w-3.5 h-3.5 flex-shrink-0',14)} Edit${selectedHere.size>1 ? ` (${selectedHere.size})` : ''}</button>
+             <button data-tray-move="${t.id}" class="flex-1 min-w-0 text-[12px] font-semibold text-white bg-forest hover:bg-forest/90 rounded-xl py-2 px-2.5 flex items-center justify-center gap-1 transition-colors shadow-xs whitespace-nowrap truncate">${icon('move-up-right','w-3.5 h-3.5 flex-shrink-0',14)} Move ${selectedHere.size} to Tower</button>
+             <button data-tray-clear-sel="${t.id}" class="text-[12px] font-medium text-ink-soft bg-cream hover:bg-cream-dark rounded-xl py-2 px-2.5 transition-colors flex-shrink-0" title="Deselect">${icon('x','w-3.5 h-3.5 flex-shrink-0',14)}</button>`
           : ready
-            ? `<button data-tray-transplant="${t.id}" class="flex-1 text-[12.5px] font-semibold text-white bg-forest hover:bg-forest/90 rounded-xl py-2.5 flex items-center justify-center gap-1.5 transition-colors shadow-xs">${icon('move-up-right','w-3.5 h-3.5',14)} Move All to Tower</button>`
-            : `<span class="flex-1 text-center text-[12px] font-medium text-ink-soft bg-cream/70 border border-line/60 rounded-xl py-2.5">Ready on ${fmtDate(addDays(t.startDate,12))}</span>`}
-        <button data-tray-remove="${t.id}" class="text-[12.5px] font-medium text-clay bg-[#FCEBD8] hover:bg-[#F8DEC0] rounded-xl py-2.5 px-3 transition-colors">${icon('trash-2','w-3.5 h-3.5',14)}</button>
+            ? `<button data-tray-transplant="${t.id}" class="flex-1 min-w-0 text-[12px] font-semibold text-white bg-forest hover:bg-forest/90 rounded-xl py-2 flex items-center justify-center gap-1.5 transition-colors shadow-xs whitespace-nowrap">${icon('move-up-right','w-3.5 h-3.5 flex-shrink-0',14)} Move All to Tower</button>`
+            : `<span class="flex-1 text-center text-[11.5px] font-medium text-ink-soft bg-cream/70 border border-line/60 rounded-xl py-2 whitespace-nowrap">Ready on ${fmtDate(addDays(t.startDate,12))}</span>`}
+        <button data-tray-remove="${t.id}" class="text-[12px] font-medium text-clay bg-[#FCEBD8] hover:bg-[#F8DEC0] rounded-xl py-2 px-2.5 transition-colors flex-shrink-0" title="Delete Tray">${icon('trash-2','w-3.5 h-3.5 flex-shrink-0',14)}</button>
       </div>`;
     list.appendChild(card);
 
@@ -1529,38 +3075,49 @@ function renderNursery(){
       cell.dataset.trayId = t.id;
       const isSelected = selectedHere.has(i);
       const isFilled = cellData.filled;
+      const cellHealth = cellData.health || 'healthy';
+      const healthBorder = cellHealth === 'unhealthy' ? 'ring-2 ring-[#F59E0B] bg-[#FEF3C7]/40' : cellHealth === 'dead' ? 'ring-2 ring-[#EF4444] bg-[#FEE2E2]/40 opacity-75' : '';
+      const healthBadge = cellHealth === 'unhealthy' ? `<span class="absolute -top-1 -right-1">${icon('alert-triangle','w-3 h-3 text-[#D97706]',12)}</span>` : cellHealth === 'dead' ? `<span class="absolute -top-1 -right-1">${icon('x-circle','w-3 h-3 text-[#DC2626]',12)}</span>` : '';
+      // (2026-07-13) Add prominent checkmark badge on top-left of selected cell; prev: border only
+      const checkBadge = isSelected ? `<span class="absolute -top-1 -left-1 w-4 h-4 bg-[#22C55E] text-white rounded-full flex items-center justify-center shadow-md z-10">${icon('check','w-2.5 h-2.5 text-white',10)}</span>` : '';
 
-      cell.className = `aspect-square rounded-md flex items-center justify-center cursor-pointer touch-none nursery-cell-cube transition-all ${isFilled ? (isSelected ? 'selected' : '') : 'opacity-40 border border-dashed border-line/60 bg-black/10 hover:opacity-80 hover:border-forest/60 hover:bg-mint/20'}`;
+      // (2026-07-13) Add health class so CSS can override selected green; prev: no health class on el
+      const healthClass = isFilled && cellHealth !== 'healthy' ? `health-${cellHealth}` : '';
+      // (2026-07-13) Use touch-pan-y on nursery cell cubes; prev: touch-none
+      cell.className = `aspect-square rounded-md flex items-center justify-center cursor-pointer touch-pan-y nursery-cell-cube relative transition-all ${healthClass} ${isFilled ? (isSelected ? 'selected ' : '') + healthBorder : 'opacity-40 border border-dashed border-line/60 bg-black/10 hover:opacity-80 hover:border-forest/60 hover:bg-mint/20'}`;
       cell.setAttribute('aria-label', `Cell ${i+1} [${cellData.id}], ${t.variety}${isFilled ? (isSelected ? ', selected' : '') : ', empty (tap to plant)'}`);
       cell.setAttribute('aria-pressed', String(isSelected));
-      cell.innerHTML = isFilled ? plantIcon(stage.key, 22) : `<span class="text-[9px] font-mono text-ink-soft/60">${cellData.id}</span>`;
+      cell.innerHTML = isFilled ? `${checkBadge}${plantIcon(stage.key, 22)}${healthBadge}` : `<span class="text-[9px] font-mono text-ink-soft/60">${cellData.id}</span>`;
       
       if(isFilled){
+        // (2026-07-13) Set mode select/unselect on longpress drag; prev: select only
         cell.addEventListener('pointerdown', (e)=>{
           tlp.activeTrayId = t.id;
           tlp.startX = e.clientX; tlp.startY = e.clientY;
           tlp.fired = false; tlp.dragging = false;
+          tlp.mode = isSelected ? 'unselect' : 'select';
           tlp.timer = setTimeout(()=>{
             tlp.fired = true; tlp.dragging = true;
-            trayCellSelect(t.id, i);
+            if(tlp.mode === 'unselect') trayCellDeselect(t.id, i); else trayCellSelect(t.id, i);
             try{ cell.setPointerCapture(e.pointerId); }catch(err){}
             if(navigator.vibrate) navigator.vibrate(12);
-          }, 220);
+          }, 180);
         });
         cell.addEventListener('pointermove', (e)=>{
           if(tlp.timer && !tlp.fired){
-            if(Math.hypot(e.clientX - tlp.startX, e.clientY - tlp.startY) > 8){
+            if(Math.hypot(e.clientX - tlp.startX, e.clientY - tlp.startY) > 12){
               clearTimeout(tlp.timer); tlp.timer = null;
             }
           }
           if(tlp.dragging){
+            if(e.cancelable) e.preventDefault();
             const under = document.elementFromPoint(e.clientX, e.clientY);
             const targetCell = under && under.closest && under.closest('[data-cell-idx]');
             if(targetCell){
               const tId = targetCell.dataset.trayId;
               const cIdx = Number(targetCell.dataset.cellIdx);
               if(tId === t.id && !isNaN(cIdx)){
-                trayCellSelect(tId, cIdx);
+                if(tlp.mode === 'unselect') trayCellDeselect(tId, cIdx); else trayCellSelect(tId, cIdx);
               }
             }
           }
@@ -1621,9 +3178,112 @@ function renderNursery(){
       persist('trays'); renderNursery();
     });
   }));
-  // (2026-07-13) Wire edit tray button; prev: none
+  // (2026-07-13) Wire single or multi-cell edit button; prev: single cell idx only
   list.querySelectorAll('[data-tray-edit]').forEach(btn=>btn.addEventListener('click', ()=>openEditTrayModal(btn.dataset.trayEdit)));
+  list.querySelectorAll('[data-tray-edit-cell]').forEach(btn=>btn.addEventListener('click', ()=>{
+    const tId = btn.dataset.trayEditCell;
+    const selArray = (traySelection.trayId === tId && traySelection.indices.size > 0) ? Array.from(traySelection.indices) : (btn.dataset.cellIdx !== undefined ? [Number(btn.dataset.cellIdx)] : []);
+    if(selArray.length > 0) openTrayCellModal(tId, selArray);
+  }));
 }
+
+// (2026-07-13) Support batch editing single or multiple selected tray cells; prev: single cell only
+function openTrayCellModal(trayId, cellIndices){
+  const tray = state.trays.find(t=>t.id===trayId);
+  if(!tray) return;
+  const cells = getTrayCells(tray);
+  const targetIndices = Array.isArray(cellIndices) ? cellIndices : [cellIndices];
+  if(targetIndices.length === 0) return;
+
+  const isMulti = targetIndices.length > 1;
+  const firstCell = cells[targetIndices[0]];
+  if(!firstCell) return;
+
+  const titleText = isMulti ? `Tray "${tray.variety}" · ${targetIndices.length} Seedlings Selected` : `Tray "${tray.variety}" · Cell #${targetIndices[0]+1} [${firstCell.id}]`;
+  document.getElementById('trayCellModalTitle').textContent = titleText;
+  
+  const body = document.getElementById('trayCellModalBody');
+  const health = isMulti ? 'healthy' : (firstCell.health || 'healthy');
+  
+  body.innerHTML = `
+    <div class="bg-cream rounded-xl p-3.5 mb-4">
+      <div class="text-[13px] font-semibold text-ink mb-1">${isMulti ? `Batch Editing ${targetIndices.length} Selected Seedlings` : 'Seedling Cell Details'}</div>
+      <div class="text-[12px] text-ink-soft">Variety: <strong>${tray.variety}</strong> · ${isMulti ? `${targetIndices.length} cells selected` : `Status: ${firstCell.filled?'Planted':'Empty'}`}</div>
+    </div>
+    <label class="text-[12px] font-semibold text-ink-soft mb-2 block">Seedling Health / Condition</label>
+    <div class="grid grid-cols-3 gap-2 mb-4">
+      <button id="btnCellHealthHealthy" class="py-2.5 px-1 text-[12.5px] rounded-xl border flex items-center justify-center gap-1.5 transition-all ${!isMulti && health==='healthy'?'bg-[#DCFCE7] border-[#22C55E] text-[#15803D] font-semibold shadow-sm':'border-line text-ink-soft'}">${icon('circle-check','w-4 h-4',16)} Healthy</button>
+      <button id="btnCellHealthUnhealthy" class="py-2.5 px-1 text-[12.5px] rounded-xl border flex items-center justify-center gap-1.5 transition-all ${!isMulti && health==='unhealthy'?'bg-[#FEF3C7] border-[#F59E0B] text-[#92400E] font-semibold shadow-sm':'border-line text-ink-soft'}">${icon('alert-triangle','w-4 h-4',16)} Unhealthy</button>
+      <button id="btnCellHealthDead" class="py-2.5 px-1 text-[12.5px] rounded-xl border flex items-center justify-center gap-1.5 transition-all ${!isMulti && health==='dead'?'bg-[#FEE2E2] border-[#EF4444] text-[#991B1B] font-semibold shadow-sm':'border-line text-ink-soft'}">${icon('x-circle','w-4 h-4',16)} Dead</button>
+    </div>
+    ${!isMulti ? `
+    <div class="mb-4 bg-cream/40 p-3 rounded-xl border border-line/60">
+      <label class="text-[12px] font-semibold text-ink-soft mb-1.5 flex items-center justify-between cursor-pointer">
+        <span>📷 Seedling Photo</span>
+        <span class="text-[11.5px] font-semibold text-forest underline">${firstCell.photo?'Change Photo':'Attach Photo'}</span>
+        <input id="cellPhotoInput" type="file" accept="image/*" class="hidden">
+      </label>
+      ${firstCell.photo ? `<div class="relative mt-1 max-h-[120px] rounded-lg overflow-hidden border border-line bg-black/5 flex items-center justify-center">
+        <img src="${firstCell.photo}" class="max-h-[120px] object-contain rounded-lg" alt="Seedling Photo">
+        <button id="btnRemoveCellPhoto" class="absolute top-1.5 right-1.5 w-6 h-6 bg-black/60 text-white rounded-full flex items-center justify-center text-[10px]">✕</button>
+      </div>` : '<p class="text-[11px] text-ink-soft">Attach a photo for this seedling cell.</p>'}
+    </div>` : ''}
+    <div class="flex flex-col gap-2">
+      <button id="btnClearDeadCell" class="w-full text-[12.5px] font-medium text-clay bg-[#FCEBD8] hover:bg-[#F8DEC0] rounded-xl py-2.5 flex items-center justify-center gap-1.5 transition-colors">${icon('trash-2','w-4 h-4',16)} ${isMulti ? `Clear / Remove ${targetIndices.length} Selected Seedlings` : 'Clear / Remove Dead Seedling'}</button>
+    </div>`;
+
+  const setHealth = (h)=>{
+    targetIndices.forEach(idx => {
+      if(cells[idx]) cells[idx].health = h;
+    });
+    logActivityNotification('⚠️ Seedling Health Updated', `Tray ${tray.variety} ${targetIndices.length} cell(s) marked as ${h}`, 'alert-triangle');
+    persist('trays');
+    closeModal('trayCellModal');
+    renderNursery();
+    showToast(`${targetIndices.length} seedling(s) marked as ${h}`,'forest','sprout');
+  };
+  document.getElementById('btnCellHealthHealthy')?.addEventListener('click', ()=>setHealth('healthy'));
+  document.getElementById('btnCellHealthUnhealthy')?.addEventListener('click', ()=>setHealth('unhealthy'));
+  document.getElementById('btnCellHealthDead')?.addEventListener('click', ()=>setHealth('dead'));
+
+  if(!isMulti){
+    document.getElementById('cellPhotoInput')?.addEventListener('change', (e)=>{
+      const file = e.target.files[0]; if(!file) return;
+      const reader = new FileReader();
+      reader.onload = ()=>{
+        firstCell.photo = reader.result;
+        persist('trays'); openTrayCellModal(trayId, cellIndices);
+        showToast('Seedling photo attached','forest','camera');
+      };
+      reader.readAsDataURL(file);
+    });
+    document.getElementById('btnRemoveCellPhoto')?.addEventListener('click', ()=>{
+      delete firstCell.photo;
+      persist('trays'); openTrayCellModal(trayId, cellIndices);
+    });
+  }
+
+  document.getElementById('btnClearDeadCell')?.addEventListener('click', ()=>{
+    const snapshotTrays = JSON.parse(JSON.stringify(state.trays));
+    targetIndices.forEach(idx => {
+      if(cells[idx]){
+        cells[idx].filled = false;
+        cells[idx].health = 'healthy';
+      }
+    });
+    tray.count = cells.filter(c=>c.filled).length;
+    persist('trays');
+    closeModal('trayCellModal');
+    renderNursery();
+    triggerUndoSnackbar(`Removed ${targetIndices.length} seedling(s) from tray`, ()=>{
+      state.trays = snapshotTrays;
+      persist('trays');
+      renderNursery();
+    });
+  });
+  document.getElementById('trayCellModal').classList.remove('hidden');
+}
+document.getElementById('trayCellModalClose')?.addEventListener('click', ()=>closeModal('trayCellModal'));
 
 // (2026-07-13) Edit tray modal logic; prev: none
 let editingTrayId = null;
@@ -1657,7 +3317,12 @@ function openEditTrayModal(trayId){
   const colsEl = document.getElementById('editTrayGridCols');
   if(!rowsEl.dataset.wired){
     rowsEl.dataset.wired='1';
-    const upd=()=>document.getElementById('editTrayCalcCount').textContent=Math.max(1,Number(rowsEl.value)||1)*Math.max(1,Number(colsEl.value)||1);
+    // (2026-07-13) Enforce 1-10 row/col limit on edit tray; prev: max 20
+    const upd=()=>{
+      const r = Math.min(10, Math.max(1, Number(rowsEl.value)||1));
+      const c = Math.min(10, Math.max(1, Number(colsEl.value)||1));
+      document.getElementById('editTrayCalcCount').textContent=r*c;
+    };
     rowsEl.addEventListener('input',upd); colsEl.addEventListener('input',upd);
   }
 
@@ -1673,8 +3338,8 @@ document.getElementById('editTrayForm')?.addEventListener('submit',(e)=>{
   const presetVariety = document.getElementById('editTrayVariety')?.value;
   tray.variety = customName || (presetVariety==='__custom__' ? tray.variety : presetVariety) || tray.variety;
   tray.startDate = document.getElementById('editTrayDate').value || tray.startDate;
-  const r = Math.max(1, Number(document.getElementById('editTrayGridRows')?.value)||1);
-  const c = Math.max(1, Number(document.getElementById('editTrayGridCols')?.value)||1);
+  const r = Math.min(10, Math.max(1, Number(document.getElementById('editTrayGridRows')?.value)||1));
+  const c = Math.min(10, Math.max(1, Number(document.getElementById('editTrayGridCols')?.value)||1));
   tray.count = r * c; tray.gridRows = r; tray.gridCols = c; tray.dimensions = `${r}×${c}`;
   persist('trays'); closeModal('editTrayModal'); renderNursery();
   showToast(`Tray updated`,'forest','pencil');
@@ -1688,9 +3353,10 @@ document.getElementById('btnAddTray').addEventListener('click', ()=>{
   document.getElementById('trayDate').value = todayISO();
   const rowsEl = document.getElementById('trayGridRows');
   const colsEl = document.getElementById('trayGridCols');
+  // (2026-07-13) Enforce 1-10 row/col limit on new tray; prev: max 20
   const updateCalc = ()=>{
-    const r = Math.max(1, Number(rowsEl?.value)||1);
-    const c = Math.max(1, Number(colsEl?.value)||1);
+    const r = Math.min(10, Math.max(1, Number(rowsEl?.value)||1));
+    const c = Math.min(10, Math.max(1, Number(colsEl?.value)||1));
     const tot = r * c;
     const calcEl = document.getElementById('trayCalcCount');
     const cntEl = document.getElementById('trayCount');
@@ -1710,8 +3376,8 @@ document.getElementById('trayForm').addEventListener('submit', (e)=>{
   const customName = document.getElementById('trayCustomName')?.value.trim();
   const presetVariety = document.getElementById('trayVariety')?.value;
   const variety = customName || presetVariety || 'Custom Crop';
-  const r = Math.max(1, Number(document.getElementById('trayGridRows')?.value)||1);
-  const c = Math.max(1, Number(document.getElementById('trayGridCols')?.value)||1);
+  const r = Math.min(10, Math.max(1, Number(document.getElementById('trayGridRows')?.value)||1));
+  const c = Math.min(10, Math.max(1, Number(document.getElementById('trayGridCols')?.value)||1));
   const count = r * c;
   const dimensions = `${r}×${c}`;
   state.trays.push({ id: uid(), variety, startDate: document.getElementById('trayDate').value || todayISO(), count, gridRows:r, gridCols:c, dimensions });
@@ -2045,13 +3711,22 @@ document.querySelectorAll('.weather-sim-btn').forEach(btn=>btn.addEventListener(
   renderAlertBanner('alertBanner'); renderAlertBanner('alertBanner2'); renderAlertLog();
   showToast(alert.title, type==='rain'?'forest':'clay', type==='rain'?'cloud-rain':'wind');
 }));
+// (2026-07-13) Native mobile toast message on grant; prev: browser tab
 async function requestBrowserNotifs(){
-  if(!('Notification' in window)){ showToast('Notifications are not supported in this browser','clay','alert-triangle'); return; }
+  if(typeof notificationManager !== 'undefined' && notificationManager.requestPermissions){
+    await notificationManager.requestPermissions();
+    state.settings.browserNotifs=true; persist('settings');
+    showToast('Mobile notifications enabled — daily reminders scheduled','forest','bell');
+    document.getElementById('firstPlantPrompt')?.classList.add('hidden');
+    return;
+  }
+  if(!('Notification' in window)){ showToast('Notifications are not supported on this device','clay','alert-triangle'); return; }
   const perm = await Notification.requestPermission();
-  if(perm==='granted'){ state.settings.browserNotifs=true; persist('settings'); showToast('Browser notifications enabled — keep this tab open','forest','bell'); document.getElementById('firstPlantPrompt')?.classList.add('hidden'); }
+  if(perm==='granted'){ state.settings.browserNotifs=true; persist('settings'); showToast('Mobile notifications enabled — daily reminders scheduled','forest','bell'); document.getElementById('firstPlantPrompt')?.classList.add('hidden'); }
   else showToast('Notification permission was not granted','clay','bell-off');
 }
-document.getElementById('btnEnableNotifs').addEventListener('click', requestBrowserNotifs);
+// (2026-07-13) Guard btnEnableNotifs; element removed from HTML; prev: hard crash
+document.getElementById('btnEnableNotifs')?.addEventListener('click', requestBrowserNotifs);
 document.getElementById('btnEnableNotifsPrompt')?.addEventListener('click', requestBrowserNotifs);
 document.getElementById('btnDismissFirstPlant')?.addEventListener('click', ()=>document.getElementById('firstPlantPrompt').classList.add('hidden'));
 
@@ -2086,12 +3761,26 @@ function renderExpenses(){
   expList.innerHTML = '';
   state.expenses.slice().reverse().forEach(e=>{
     const row = document.createElement('div');
-    row.className = 'flex items-center justify-between py-2.5';
-    row.innerHTML = `<div class="min-w-0"><div class="text-[13px] font-medium text-ink truncate">${e.name}</div><div class="text-[11px] text-ink-soft">${e.category}</div></div>
-      <div class="flex items-center gap-2 flex-shrink-0"><span class="font-mono text-[13px] font-semibold">₱${fmtPeso(e.amount)}</span><button data-del-expense="${e.id}" class="text-ink-soft/60 hover:text-clay">${icon('x','w-3.5 h-3.5',14)}</button></div>`;
+    row.className = 'flex items-center justify-between py-2.5 pr-1';
+    row.innerHTML = `<div class="min-w-0 pr-2"><div class="text-[13px] font-medium text-ink truncate">${e.name}</div><div class="text-[11px] text-ink-soft">${e.category}</div></div>
+      <div class="flex items-center gap-2 flex-shrink-0"><span class="font-mono text-[13px] font-semibold">₱${fmtPeso(e.amount)}</span><button data-del-expense="${e.id}" class="text-ink-soft/60 hover:text-clay hover:bg-clay/10 p-1 rounded-lg transition-colors ml-1" title="Delete expense">${icon('x','w-3.5 h-3.5',14)}</button></div>`;
     expList.appendChild(row);
   });
-  expList.querySelectorAll('[data-del-expense]').forEach(btn=>btn.addEventListener('click', ()=>{ state.expenses=state.expenses.filter(e=>e.id!==btn.dataset.delExpense); persist('expenses'); renderExpenses(); }));
+// (2026-07-13) Spaced delete button & undo snackbar on delete; prev: instant del
+  expList.querySelectorAll('[data-del-expense]').forEach(btn=>btn.addEventListener('click', ()=>{
+    const targetId = btn.dataset.delExpense;
+    const targetIndex = state.expenses.findIndex(e=>e.id===targetId);
+    if(targetIndex === -1) return;
+    const deletedItem = state.expenses[targetIndex];
+    state.expenses = state.expenses.filter(e=>e.id!==targetId);
+    persist('expenses');
+    renderExpenses();
+    triggerUndoSnackbar(`Deleted "${deletedItem.name}"`, ()=>{
+      state.expenses.splice(targetIndex, 0, deletedItem);
+      persist('expenses');
+      renderExpenses();
+    });
+  }));
 
   const harvestList = document.getElementById('harvestList');
   const harvestEmpty = document.getElementById('harvestEmptyState');
@@ -2105,7 +3794,144 @@ function renderExpenses(){
       harvestList.appendChild(row);
     });
   }
+  // (2026-07-13) Harvest photo upload & harvest gallery render; prev: no photos
+  renderHarvestGallery();
 }
+
+let pendingHarvestPhoto = null;
+document.getElementById('harvestPhotoInput')?.addEventListener('change', (e)=>{
+  const file = e.target.files[0]; if(!file) return;
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    pendingHarvestPhoto = reader.result;
+    const imgEl = document.getElementById('harvestPhotoImg');
+    const prevEl = document.getElementById('harvestPhotoPreview');
+    if(imgEl) imgEl.src = reader.result;
+    if(prevEl) prevEl.classList.remove('hidden');
+    showToast('Harvest photo attached', 'forest', 'camera');
+  };
+  reader.readAsDataURL(file);
+});
+document.getElementById('btnRemoveHarvestPhoto')?.addEventListener('click', ()=>{
+  pendingHarvestPhoto = null;
+  document.getElementById('harvestPhotoPreview')?.classList.add('hidden');
+  const inp = document.getElementById('harvestPhotoInput');
+  if(inp) inp.value = '';
+});
+
+function resetHarvestPhotoForm(){
+  pendingHarvestPhoto = null;
+  document.getElementById('harvestPhotoPreview')?.classList.add('hidden');
+  const inp = document.getElementById('harvestPhotoInput');
+  if(inp) inp.value = '';
+}
+
+function renderHarvestGallery(){
+  const grid = document.getElementById('harvestGalleryGrid');
+  const empty = document.getElementById('harvestGalleryEmpty');
+  const countEl = document.getElementById('harvestPhotoCount');
+  if(!grid) return;
+
+  const photos = state.harvests.filter(h=>h.photo);
+  if(countEl) countEl.textContent = `${photos.length} photo${photos.length!==1?'s':''}`;
+
+  if(photos.length === 0){
+    grid.innerHTML = '';
+    empty?.classList.remove('hidden');
+    return;
+  }
+  empty?.classList.add('hidden');
+
+  // (2026-07-13) Soft gradient & z-20 pure white text overlay; prev: dark covered
+  grid.innerHTML = photos.slice().reverse().map(h=>`
+    <div class="photo-log-card group relative cursor-pointer rounded-2xl overflow-hidden bg-black shadow-sm border border-line/20" data-harvest-photo-id="${h.id}">
+      <img src="${h.photo}" style="width:100% !important; height:100% !important; object-fit:cover !important;" class="w-full aspect-square block group-hover:scale-105 transition-transform duration-300" alt="${h.variety} harvest" loading="lazy">
+      <div style="position:absolute !important; bottom:0 !important; left:0 !important; right:0 !important; width:100% !important; height:50% !important; background:linear-gradient(to top, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.3) 60%, rgba(0,0,0,0) 100%) !important; pointer-events:none !important; z-index:5 !important;"></div>
+      <div class="absolute bottom-0 left-0 right-0 p-2 text-white" style="z-index:20 !important;">
+        <div class="text-[11px] font-bold leading-tight truncate" style="color:#FFFFFF !important; text-shadow:0 1px 3px rgba(0,0,0,0.9);">${h.variety}</div>
+        <div class="flex items-center justify-between mt-0.5">
+          <span class="text-[9.5px]" style="color:#FFFFFF !important; opacity:0.9; text-shadow:0 1px 2px rgba(0,0,0,0.9);">${formatLogDate(h.date)}</span>
+          <span class="text-[9.5px] font-mono font-bold text-gold bg-black/40 px-1.5 py-0.5 rounded-full">${h.grams}g</span>
+        </div>
+      </div>
+    </div>
+  `).join('');
+
+  grid.querySelectorAll('[data-harvest-photo-id]').forEach(card=>{
+    card.addEventListener('click', ()=>{
+      const h = state.harvests.find(x=>x.id===card.dataset.harvestPhotoId);
+      if(h) openPhotoDetailModal_Harvest(h);
+    });
+  });
+}
+
+// (2026-07-13) Fix z-index priority on harvest modal; prev: z-[100]
+function openPhotoDetailModal_Harvest(h){
+  let existing = document.getElementById('harvestDetailModal');
+  if(existing) existing.remove();
+  const val = Math.round((h.grams/1000)*(h.marketRate||500));
+  const modal = document.createElement('div');
+  modal.id = 'harvestDetailModal';
+  modal.setAttribute('role','dialog');
+  modal.setAttribute('aria-modal','true');
+  modal.style.cssText = 'position:fixed !important; top:0 !important; left:0 !important; right:0 !important; bottom:0 !important; width:100vw !important; height:100vh !important; z-index:999999 !important; background:rgba(0,0,0,0.95) !important; display:flex; flex-direction:column; justify-content:space-between; padding:16px; overflow-y:auto; user-select:none; backdrop-filter:blur(12px);';
+  modal.innerHTML = `
+    <div class="flex items-center justify-between w-full max-w-lg mx-auto py-2 px-1 flex-shrink-0">
+      <div>
+        <div class="font-display font-bold text-[16px] leading-tight">${h.variety}</div>
+        <div class="text-[11.5px] text-white/60">${fmtDate(h.date)}</div>
+      </div>
+      <button id="harvestDetailClose" type="button" class="w-9 h-9 rounded-full bg-white/15 hover:bg-white/25 flex items-center justify-center text-[18px] font-bold transition-colors">✕</button>
+    </div>
+
+    <div class="flex-1 flex flex-col items-center justify-center my-auto py-3 w-full max-w-lg mx-auto">
+      <div id="harvestPhotoFrame" class="relative max-w-md w-full aspect-square overflow-hidden rounded-2xl bg-black border border-white/15 shadow-2xl transition-all duration-300 cursor-pointer flex items-center justify-center">
+        <img id="harvestDetailImg" src="${h.photo}" class="w-full h-full object-cover transition-all duration-300" alt="Harvest photo">
+        <div id="harvestZoomBadge" class="absolute bottom-3 left-1/2 -translate-x-1/2 bg-black/65 backdrop-blur-md text-white/90 text-[10.5px] font-medium px-3 py-1 rounded-full border border-white/20 pointer-events-none shadow-md">
+          Tap photo to view full / uncropped
+        </div>
+      </div>
+    </div>
+
+    <div class="w-full max-w-lg mx-auto bg-white/10 backdrop-blur-xl border border-white/15 rounded-2xl p-4 flex flex-col gap-3 flex-shrink-0 mb-2">
+      <div class="flex items-center justify-between">
+        <div class="font-display font-bold text-[17px] text-white">${h.variety}</div>
+        <span class="text-[12px] font-mono font-bold text-emerald-400 bg-emerald-500/20 border border-emerald-500/30 px-3 py-1 rounded-full">${h.grams} grams</span>
+      </div>
+      <div class="grid grid-cols-2 gap-2 text-[11.5px] text-white/80">
+        <div class="bg-black/30 rounded-xl p-2.5 border border-white/10"><div class="text-white/40 text-[10px] uppercase font-semibold">Date Harvested</div><div class="font-medium mt-0.5">${fmtDate(h.date)}</div></div>
+        <div class="bg-black/30 rounded-xl p-2.5 border border-white/10"><div class="text-white/40 text-[10px] uppercase font-semibold">Saved Market Value</div><div class="font-medium text-emerald-400 mt-0.5">₱${val}</div></div>
+      </div>
+    </div>`;
+
+  document.body.appendChild(modal);
+
+  let isFullView = false;
+  const frame = modal.querySelector('#harvestPhotoFrame');
+  const img = modal.querySelector('#harvestDetailImg');
+  const badge = modal.querySelector('#harvestZoomBadge');
+
+  frame.addEventListener('click', ()=>{
+    isFullView = !isFullView;
+    if(isFullView){
+      frame.classList.remove('aspect-square', 'max-w-md');
+      frame.classList.add('max-h-[75vh]');
+      img.classList.remove('h-full', 'object-cover');
+      img.classList.add('max-h-[75vh]', 'w-auto', 'object-contain');
+      badge.textContent = 'Tap to fit 1:1 square';
+    } else {
+      frame.classList.remove('max-h-[75vh]');
+      frame.classList.add('aspect-square', 'max-w-md');
+      img.classList.remove('max-h-[75vh]', 'w-auto', 'object-contain');
+      img.classList.add('h-full', 'object-cover');
+      badge.textContent = 'Tap photo to view full / uncropped';
+    }
+  });
+
+  document.getElementById('harvestDetailClose').onclick = ()=>modal.remove();
+  modal.addEventListener('click', ev=>{ if(ev.target===modal) modal.remove(); });
+}
+
 document.getElementById('btnAddExpense').addEventListener('click', ()=>{ document.getElementById('expenseForm').reset(); document.getElementById('expenseModal').classList.remove('hidden'); });
 document.getElementById('expenseForm').addEventListener('submit', (e)=>{
   e.preventDefault();
@@ -2115,26 +3941,30 @@ document.getElementById('expenseForm').addEventListener('submit', (e)=>{
 });
 document.getElementById('btnAddHarvest').addEventListener('click', ()=>{
   document.getElementById('harvestForm').reset();
+  resetHarvestPhotoForm();
   document.getElementById('harvestForm').onsubmit = harvestFormDefaultHandler;
   document.getElementById('harvestModal').classList.remove('hidden');
 });
 function harvestFormDefaultHandler(e){
   e.preventDefault();
-  state.harvests.push({ id: uid(), variety: document.getElementById('harvestVariety').value || 'Unspecified', grams: Number(document.getElementById('harvestGrams').value)||0, date: todayISO() });
-  persist('harvests'); closeModal('harvestModal'); renderExpenses();
+  const rate = Number(document.getElementById('harvestMarketRate')?.value) || 500;
+  state.harvests.push({ id: uid(), variety: document.getElementById('harvestVariety').value || 'Unspecified', grams: Number(document.getElementById('harvestGrams').value)||0, marketRate: rate, photo: pendingHarvestPhoto || null, date: todayISO() });
+  persist('harvests'); closeModal('harvestModal'); resetHarvestPhotoForm(); renderExpenses();
   showToast('Harvest logged','gold','scissors');
 }
 document.getElementById('harvestForm').addEventListener('submit', harvestFormDefaultHandler);
 function openHarvestModal(pocket){
   document.getElementById('harvestForm').reset();
+  resetHarvestPhotoForm();
   document.getElementById('harvestVariety').value = pocket.variety;
   document.getElementById('harvestModal').classList.remove('hidden');
   document.getElementById('harvestForm').onsubmit = (e)=>{
     e.preventDefault();
-    state.harvests.push({ id: uid(), variety: document.getElementById('harvestVariety').value || pocket.variety, grams: Number(document.getElementById('harvestGrams').value)||0, date: todayISO(), pocketId: pocket.id });
+    const rate = Number(document.getElementById('harvestMarketRate')?.value) || 500;
+    state.harvests.push({ id: uid(), variety: document.getElementById('harvestVariety').value || pocket.variety, grams: Number(document.getElementById('harvestGrams').value)||0, marketRate: rate, photo: pendingHarvestPhoto || null, date: todayISO(), pocketId: pocket.id });
     pocket.variety=null; pocket.datePlanted=null; pocket.override=null;
     persist('harvests'); persist('pockets');
-    closeModal('harvestModal'); renderTower();
+    closeModal('harvestModal'); resetHarvestPhotoForm(); renderTower();
     showToast(`Harvested Pocket #${pocket.id}`,'gold','scissors');
     document.getElementById('harvestForm').onsubmit = harvestFormDefaultHandler;
   };
@@ -2221,8 +4051,9 @@ function currentPageName(){ const visible=[...document.querySelectorAll('.page')
   }
 });
 
-document.getElementById('btnOverlayGoogleSignIn')?.addEventListener('click', ()=>cloudSync.signInWithGoogle());
-document.getElementById('btnOverlayOffline')?.addEventListener('click', ()=>cloudSync.continueOffline());
+// (2026-07-13) Safely invoke window.cloudSync methods on click; prev: bare cloudSync
+document.getElementById('btnOverlayGoogleSignIn')?.addEventListener('click', ()=>window.cloudSync?.signInWithGoogle());
+document.getElementById('btnOverlayOffline')?.addEventListener('click', ()=>window.cloudSync?.continueOffline());
 
 // (2026-07-13) Wire Reservoir modal button and form submit; prev: none
 document.getElementById('btnOpenReservoirModal')?.addEventListener('click', openReservoirModal);
@@ -2269,12 +4100,418 @@ function updateRotationPlanner(){
   document.getElementById(id)?.addEventListener('input', updateRotationPlanner);
 });
 
-/* ================= FIRST RENDER ================= */
-renderDashboard();
+// (2026-07-13) Restore last active page or 5m timeout to home; prev: dashboard
+const INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000;
+const initialNavPage = (function(){
+  try {
+    const lastActive = Number(localStorage.getItem('ht_last_activity')) || 0;
+    const now = Date.now();
+    localStorage.setItem('ht_last_activity', String(now));
+    if(lastActive > 0 && (now - lastActive) > INACTIVITY_TIMEOUT_MS){
+      localStorage.setItem('ht_active_page', 'dashboard');
+      return 'dashboard';
+    }
+    const saved = localStorage.getItem('ht_active_page');
+    return (saved && document.getElementById('page-' + saved)) ? saved : 'dashboard';
+  } catch(e){
+    return 'dashboard';
+  }
+})();
+showPage(initialNavPage, { instant: true });
 updateNutrients();
 updateRotationPlanner();
 maybeTriggerFirstPlantFlow();
-updateSyncStatus('offline');
+// (2026-07-13) Safe check for updateSyncStatus on startup; prev: direct call
+if (typeof updateSyncStatus === 'function') updateSyncStatus('offline');
 if (typeof bootAuth === 'function') {
   bootAuth().catch(err => console.log('Auth boot skipped:', err));
 }
+
+// (2026-07-13) Log activity & milestone notifications; prev: toast only
+function logActivityNotification(title, message, iconName){
+  if (!state.alertLog) state.alertLog = [];
+  state.alertLog.unshift({
+    id: 'act_' + Date.now(),
+    title,
+    message,
+    timestamp: Date.now(),
+    iconName: iconName || 'bell'
+  });
+  persist('alertLog');
+  if (typeof notificationManager !== 'undefined' && notificationManager.sendNotification) {
+    notificationManager.sendNotification(title, message);
+  }
+}
+
+// (2026-07-13) Sync custom reminders to state.settings & DB; prev: local only
+function getCustomReminders(){
+  if(state.settings && Array.isArray(state.settings.customReminders)) {
+    return state.settings.customReminders;
+  }
+  const defaultList = [
+    { id: 'cr_1', title: 'Check Reservoir pH & EC', time: '08:30', active: true },
+    { id: 'cr_2', title: 'Refill Water Tank', time: '17:00', active: true }
+  ];
+  if(state.settings){
+    state.settings.customReminders = defaultList;
+    persist('settings');
+  }
+  return defaultList;
+}
+// (2026-07-13) Use .on class for custom reminder switches; prev: .active
+function renderCustomReminders(){
+  const container = document.getElementById('customReminderList');
+  if(!container) return;
+  const list = getCustomReminders();
+  if(list.length === 0){
+    container.innerHTML = '<div class="text-[12px] text-ink-soft text-center py-2">No custom reminders set.</div>';
+    return;
+  }
+  container.innerHTML = list.map(r=>`
+    <div class="flex items-center justify-between p-2 rounded-xl bg-cream/40 border border-line/60">
+      <div>
+        <div class="font-semibold text-[13px] text-ink">${r.title}</div>
+        <div class="text-[11.5px] font-mono text-ink-soft">${r.time}</div>
+      </div>
+      <div class="flex items-center gap-2">
+        <div class="switch ${r.active?'on':''}" data-custom-rem-toggle="${r.id}" role="switch" aria-checked="${r.active}" tabindex="0"></div>
+        <button data-custom-rem-del="${r.id}" class="text-clay hover:text-clay-dark p-1">${icon('trash-2','w-3.5 h-3.5',14)}</button>
+      </div>
+    </div>`).join('');
+
+  // (2026-07-13) Update dashboard tasks when custom reminders change; prev: none
+  function toggleRem(id){
+    const rems = getCustomReminders();
+    const r = rems.find(x=>x.id===id);
+    if(r){
+      r.active = !r.active;
+      state.settings.customReminders = rems;
+      persist('settings');
+      store.set('custom_reminders', rems);
+      renderCustomReminders();
+      if(typeof renderDashboard === 'function') renderDashboard();
+    }
+  }
+
+  container.querySelectorAll('[data-custom-rem-toggle]').forEach(sw=>{
+    sw.addEventListener('click', ()=>toggleRem(sw.dataset.customRemToggle));
+    sw.addEventListener('keydown', (e)=>{
+      if(e.key==='Enter' || e.key===' '){ e.preventDefault(); toggleRem(sw.dataset.customRemToggle); }
+    });
+  });
+  container.querySelectorAll('[data-custom-rem-del]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const id = btn.dataset.customRemDel;
+      const rems = getCustomReminders().filter(x=>x.id!==id);
+      state.settings.customReminders = rems;
+      persist('settings');
+      store.set('custom_reminders', rems);
+      renderCustomReminders();
+      if(typeof renderDashboard === 'function') renderDashboard();
+    });
+  });
+}
+// (2026-07-13) Open modal for adding reminder; prev: browser prompt()
+document.getElementById('btnAddCustomReminder')?.addEventListener('click', ()=>{
+  const titleEl = document.getElementById('addReminderTitle');
+  const timeEl = document.getElementById('addReminderTime');
+  if(titleEl) titleEl.value = '';
+  if(timeEl) timeEl.value = '09:00';
+  document.getElementById('addReminderModal')?.classList.remove('hidden');
+  setTimeout(()=>titleEl?.focus(), 100);
+});
+document.getElementById('addReminderModalClose')?.addEventListener('click', ()=>document.getElementById('addReminderModal')?.classList.add('hidden'));
+document.getElementById('btnConfirmAddReminder')?.addEventListener('click', ()=>{
+  const title = (document.getElementById('addReminderTitle')?.value || '').trim();
+  const time = document.getElementById('addReminderTime')?.value || '09:00';
+  if(!title) { document.getElementById('addReminderTitle')?.focus(); return; }
+  const rems = getCustomReminders();
+  rems.push({ id: 'cr_' + Date.now(), title, time, active: true });
+  state.settings.customReminders = rems;
+  persist('settings');
+  store.set('custom_reminders', rems);
+  document.getElementById('addReminderModal')?.classList.add('hidden');
+  renderCustomReminders();
+  if(typeof renderDashboard === 'function') renderDashboard();
+});
+renderCustomReminders();
+
+// (2026-07-13) Pest diagnostic photo upload preview; prev: text only
+document.getElementById('pestPhotoInput')?.addEventListener('change', (e)=>{
+  const file = e.target.files[0]; if(!file) return;
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    document.getElementById('pestPhotoImg').src = reader.result;
+    document.getElementById('pestPhotoPreview').classList.remove('hidden');
+    showToast('Leaf photo attached for diagnostic check', 'forest', 'camera');
+  };
+  reader.readAsDataURL(file);
+});
+document.getElementById('btnRemovePestPhoto')?.addEventListener('click', ()=>{
+  document.getElementById('pestPhotoPreview').classList.add('hidden');
+  document.getElementById('pestPhotoInput').value = '';
+});
+
+// (2026-07-13) Export financial and harvest summary PDF report; prev: none
+function exportFinancialPDFReport(){
+  const spent = state.expenses.reduce((s,e)=>s+Number(e.amount||0),0);
+  const grams = state.harvests.reduce((s,h)=>s+Number(h.grams||0),0);
+  const savings = Math.round((grams/1000)*500);
+  const roi = spent > 0 ? Math.round((savings/spent)*100) : 0;
+  
+  const win = window.open('', '_blank');
+  win.document.write(`<!DOCTYPE html><html><head><title>HydroTrack Financial Report</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; margin: 30px; color: #1e293b; }
+    h1 { color: #166534; margin-bottom: 4px; }
+    .meta { color: #64748b; font-size: 13px; margin-bottom: 24px; }
+    .cards { display: flex; gap: 16px; margin-bottom: 24px; }
+    .card { flex: 1; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; }
+    .card-label { font-size: 12px; color: #64748b; font-weight: 500; }
+    .card-val { font-size: 22px; font-weight: 700; color: #166534; margin-top: 4px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 16px; margin-bottom: 24px; font-size: 13px; }
+    th, td { border: 1px solid #e2e8f0; padding: 8px 12px; text-align: left; }
+    th { background: #f1f5f9; color: #334155; }
+    h2 { font-size: 16px; color: #166534; border-bottom: 2px solid #e2e8f0; padding-bottom: 6px; }
+  </style></head><body>
+  <h1>HydroTrack Yield & Financial Report</h1>
+  <div class="meta">Generated on ${new Date().toLocaleDateString()} · Active Tower System</div>
+  <div class="cards">
+    <div class="card"><div class="card-label">Total Invested</div><div class="card-val">₱${spent.toLocaleString()}</div></div>
+    <div class="card"><div class="card-label">Total Harvested</div><div class="card-val">${grams.toLocaleString()} g</div></div>
+    <div class="card"><div class="card-label">Market Value Saved</div><div class="card-val">₱${savings.toLocaleString()}</div></div>
+    <div class="card"><div class="card-label">ROI Recovered</div><div class="card-val">${roi}%</div></div>
+  </div>
+  <h2>Harvest Log Summary</h2>
+  <table><thead><tr><th>Date</th><th>Variety</th><th>Yield (Grams)</th><th>Est. Value</th></tr></thead><tbody>
+  ${state.harvests.length ? state.harvests.map(h=>`<tr><td>${h.date||'—'}</td><td>${h.variety}</td><td>${h.grams}g</td><td>₱${Math.round((h.grams/1000)*500)}</td></tr>`).join('') : '<tr><td colspan="4">No harvests logged yet.</td></tr>'}
+  </tbody></table>
+  <h2>Expense Log Summary</h2>
+  <table><thead><tr><th>Date</th><th>Item</th><th>Category</th><th>Amount</th></tr></thead><tbody>
+  ${state.expenses.length ? state.expenses.map(e=>`<tr><td>${e.date||'—'}</td><td>${e.name}</td><td>${e.category}</td><td>₱${Number(e.amount).toLocaleString()}</td></tr>`).join('') : '<tr><td colspan="4">No expenses logged yet.</td></tr>'}
+  </tbody></table>
+  <script>window.onload = function(){ window.print(); };</script>
+  </body></html>`);
+  win.document.close();
+}
+document.getElementById('btnExportFinancialPDF')?.addEventListener('click', exportFinancialPDFReport);
+
+// (2026-07-13) Universal back redirects to home then double-back to exit; prev: partial
+let lastBackPressTime = 0;
+
+function checkInactivityTimeout(){
+  try {
+    const lastActive = Number(localStorage.getItem('ht_last_activity')) || 0;
+    const now = Date.now();
+    if(lastActive > 0 && (now - lastActive) > 5 * 60 * 1000){
+      localStorage.setItem('ht_active_page', 'dashboard');
+      showPage('dashboard', { instant: true });
+    }
+    localStorage.setItem('ht_last_activity', String(now));
+  } catch(e){}
+}
+
+let lastActivityRecord = 0;
+function recordUserActivity(){
+  const now = Date.now();
+  if(now - lastActivityRecord > 15000){
+    lastActivityRecord = now;
+    try { localStorage.setItem('ht_last_activity', String(now)); } catch(e){}
+  }
+}
+['click', 'touchstart', 'scroll', 'keydown'].forEach(evt=>{
+  window.addEventListener(evt, recordUserActivity, { passive: true });
+});
+
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState === 'visible'){
+    checkInactivityTimeout();
+  } else {
+    try { localStorage.setItem('ht_last_activity', String(Date.now())); } catch(e){}
+  }
+});
+
+function handleUniversalBack(){
+  const openModals = Array.from(document.querySelectorAll('#fullscreenZoomModal, [role="dialog"]:not(.hidden):not(#authOverlay)'));
+  if(openModals.length > 0){
+    const topModal = openModals[openModals.length - 1];
+    if(topModal.id === 'fullscreenZoomModal'){
+      topModal.style.opacity = '0';
+      setTimeout(()=>topModal.remove(), 150);
+    } else if(topModal.id === 'photoDetailModal'){
+      const closeBtn = topModal.querySelector('#photoDetailClose');
+      if(closeBtn) closeBtn.click();
+      else topModal.remove();
+    } else if(topModal.id === 'confirmModal'){
+      const cancelBtn = document.getElementById('confirmModalCancel');
+      if(cancelBtn) cancelBtn.click();
+      else topModal.classList.add('hidden');
+    } else if(topModal.id){
+      closeModal(topModal.id);
+    } else {
+      topModal.classList.add('hidden');
+    }
+    return true;
+  }
+
+  const activePageEl = document.querySelector('.page:not(.hidden)');
+  const activePageId = activePageEl ? activePageEl.id.replace('page-', '') : 'dashboard';
+
+  if(activePageId !== 'dashboard'){
+    showPage('dashboard', { fromNav: true, fromPopState: true });
+    lastBackPressTime = 0;
+    return true;
+  }
+
+  const now = Date.now();
+  if(now - lastBackPressTime < 2500){
+    const appPlugin = window.Capacitor?.Plugins?.App || (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform() ? window.Capacitor.Plugins.App : null);
+    if(appPlugin?.exitApp){
+      appPlugin.exitApp();
+    } else if(navigator.app?.exitApp){
+      navigator.app.exitApp();
+    }
+  } else {
+    lastBackPressTime = now;
+    showToast('Press back again to exit.', 'clay', 'log-out');
+  }
+  return true;
+}
+
+function initBackButtonListener(){
+  if(window.Capacitor?.Plugins?.App?.addListener){
+    window.Capacitor.Plugins.App.addListener('backButton', ()=>{
+      handleUniversalBack();
+    });
+    window.Capacitor.Plugins.App.addListener('appStateChange', (appState)=>{
+      if(appState.isActive){
+        checkInactivityTimeout();
+      } else {
+        try { localStorage.setItem('ht_last_activity', String(Date.now())); } catch(e){}
+      }
+    });
+  }
+}
+
+initBackButtonListener();
+document.addEventListener('deviceready', initBackButtonListener);
+document.addEventListener('DOMContentLoaded', initBackButtonListener);
+
+try {
+  window.history.replaceState({ page: 'dashboard' }, '');
+} catch(e){}
+
+window.addEventListener('popstate', ()=>{
+  handleUniversalBack();
+  try {
+    window.history.pushState({ page: 'active' }, '');
+  } catch(e){}
+});
+
+// (2026-07-13) Fix scroll direction check & continuous SVG spin; prev: inline transform
+(function setupPullToRefresh(){
+  let startX = 0;
+  let startY = 0;
+  let pullDistance = 0;
+  let isPulling = false;
+  let isRefreshing = false;
+  let rafId = null;
+
+  const container = document.getElementById('pullToRefreshContainer');
+  const threshold = 55;
+
+  function updateTransform() {
+    if (!container) return;
+    if (isPulling && pullDistance > 0) {
+      const dampedY = 55 * Math.atan(pullDistance / 90);
+      const scale = Math.min(0.5 + (dampedY / threshold) * 0.5, 1.0);
+      const opacity = Math.min(dampedY / 18, 1.0);
+
+      container.style.transition = 'none';
+      container.style.opacity = String(opacity);
+      container.style.transform = `translateY(${dampedY}px) scale(${scale})`;
+    }
+  }
+
+  window.addEventListener('touchstart', (e) => {
+    if ((window.scrollY === 0 || document.documentElement.scrollTop === 0) && !isRefreshing && e.touches.length === 1) {
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      isPulling = true;
+      pullDistance = 0;
+    }
+  }, { passive: true });
+
+  window.addEventListener('touchmove', (e) => {
+    if (!isPulling || isRefreshing || (window.scrollY > 0 && document.documentElement.scrollTop > 0)) return;
+    const currentX = e.touches[0].clientX;
+    const currentY = e.touches[0].clientY;
+    const deltaX = currentX - startX;
+    const deltaY = currentY - startY;
+
+    if (Math.abs(deltaX) > Math.abs(deltaY) * 1.2) {
+      isPulling = false;
+      pullDistance = 0;
+      if (container) {
+        container.style.opacity = '0';
+        container.style.transform = 'translateY(-150px) scale(0.6)';
+      }
+      return;
+    }
+
+    if (deltaY > 0) {
+      pullDistance = deltaY;
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(updateTransform);
+    }
+  }, { passive: true });
+
+  window.addEventListener('touchend', async () => {
+    if (!isPulling || isRefreshing) return;
+    isPulling = false;
+    if (rafId) cancelAnimationFrame(rafId);
+
+    const dampedY = 55 * Math.atan(pullDistance / 90);
+    if (dampedY >= 38) {
+      isRefreshing = true;
+      if (container) {
+        container.style.transition = 'transform 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.25s ease-out';
+        container.style.opacity = '1';
+        container.style.transform = 'translateY(22px) scale(1)';
+      }
+
+      try {
+        if (typeof renderPage === 'function' && typeof currentPageName === 'function') {
+          renderPage(currentPageName());
+        }
+        if (typeof window.cloudSync !== 'undefined' && window.cloudSync.connected) {
+          await window.cloudSync.pushNow?.();
+        }
+        const skeleton = document.getElementById('dashboardSkeletonOverlay');
+        if (skeleton) {
+          skeleton.classList.remove('hidden');
+          setTimeout(() => skeleton.classList.add('hidden'), 750);
+        }
+      } catch (err) {
+        console.error('Pull to refresh failed:', err);
+      } finally {
+        setTimeout(() => {
+          if (container) {
+            container.style.transition = 'transform 0.3s ease-in, opacity 0.25s ease-in';
+            container.style.opacity = '0';
+            container.style.transform = 'translateY(-150px) scale(0.6)';
+          }
+          isRefreshing = false;
+          pullDistance = 0;
+        }, 750);
+      }
+    } else {
+      if (container) {
+        container.style.transition = 'transform 0.25s ease-out, opacity 0.2s ease-out';
+        container.style.opacity = '0';
+        container.style.transform = 'translateY(-150px) scale(0.6)';
+      }
+      pullDistance = 0;
+    }
+  });
+})();

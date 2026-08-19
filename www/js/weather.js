@@ -111,7 +111,7 @@ const weatherService = {
     }
   },
 
-  // (2026-07-13) Fetch 7-day forecast, humidity & hourly temps; prev: 3-day basic
+  // (2026-07-13) Weather fetch timeout & offline cached fallback; prev: throw error
   async getWeather(lat, lng) {
     try {
       const params = new URLSearchParams({
@@ -124,7 +124,11 @@ const weatherService = {
         forecast_days: 7
       });
 
-      const response = await fetch(`${this.API_URL}?${params}`);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 7000);
+
+      const response = await fetch(`${this.API_URL}?${params}`, { signal: controller.signal });
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         throw new Error('Weather API request failed');
@@ -132,12 +136,57 @@ const weatherService = {
 
       const data = await response.json();
       this.lastWeather = this.parseWeatherData(data);
-      
+      try { localStorage.setItem('ht_cached_weather', JSON.stringify(this.lastWeather)); } catch(e){}
       return this.lastWeather;
     } catch (error) {
-      console.error('Weather fetch error:', error);
-      throw error;
+      console.warn('Weather fetch timeout or network error, using fallback:', error.message || error);
+      try {
+        const cached = localStorage.getItem('ht_cached_weather');
+        if(cached){
+          this.lastWeather = JSON.parse(cached);
+          return this.lastWeather;
+        }
+      } catch(e){}
+      this.lastWeather = this.getFallbackWeather();
+      return this.lastWeather;
     }
+  },
+
+  getFallbackWeather() {
+    const now = new Date();
+    const hourlyTimes = Array.from({length:24}, (_,i)=>{
+      const d = new Date(now);
+      d.setHours(i, 0, 0, 0);
+      return d.toISOString();
+    });
+    return {
+      current: {
+        temperature: 28,
+        humidity: 75,
+        precipitation: 0,
+        weatherCode: 2,
+        weatherDesc: 'Partly cloudy',
+        windSpeed: 12,
+        windDirection: 90,
+        time: now.toISOString()
+      },
+      hourly: {
+        times: hourlyTimes,
+        temperatures: Array(24).fill(28),
+        humidity: Array(24).fill(75),
+        precipitationProb: Array(24).fill(20),
+        precipitation: Array(24).fill(0),
+        windSpeed: Array(24).fill(12)
+      },
+      daily: {
+        dates: [now.toISOString().split('T')[0]],
+        weatherCodes: [2],
+        tempMax: [31],
+        tempMin: [24],
+        precipitationSum: [0],
+        precipitationProbMax: [20]
+      }
+    };
   },
 
   parseWeatherData(data) {
@@ -444,8 +493,8 @@ function setupWeatherTabs(){
     [tabTemp, tabPrecip, tabWind].forEach(t => {
       if(!t) return;
       const isActive = t.id === `tabWeather${tab.charAt(0).toUpperCase() + tab.slice(1)}`;
-      // (2026-07-13) Segmented pill control active styling toggle; prev: underline border
-      t.className = `px-3.5 py-1.5 rounded-lg text-[12.5px] whitespace-nowrap transition-all flex-shrink-0 cursor-pointer ${isActive ? 'font-bold text-forest bg-white shadow-xs border border-line/60' : 'font-semibold text-ink-soft hover:text-ink bg-transparent hover:bg-white/60 border border-transparent'}`;
+      // (2026-07-13) Dark green active pill tab styling for weather card; prev: white
+      t.className = `flex-1 py-1.5 rounded-xl text-[12px] whitespace-nowrap transition-all text-center cursor-pointer ${isActive ? 'font-bold text-white bg-forest shadow-xs' : 'font-semibold text-ink-soft hover:text-ink'}`;
     });
     if(cachedWeatherData) renderHourlyGraph(cachedWeatherData);
   };
@@ -455,30 +504,40 @@ function setupWeatherTabs(){
   tabWind.onclick = () => setTab('wind');
 }
 
-// (2026-07-13) Fix chart clipping by adding padLeft & padRight inset margins; prev: point at 560px clipped edge
+// (2026-07-13) Slices hourly forecast from current hour; prev: static 0..8 hrs
 function renderHourlyGraph(weather){
   const svg = document.getElementById('weatherHourlySvg');
   if(!svg || !weather || !weather.hourly) return;
   
+  const now = new Date();
+  let startIdx = 0;
+  if(weather.hourly.times && weather.hourly.times.length){
+    const currentHourTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours()).getTime();
+    const foundIdx = weather.hourly.times.findIndex(t => new Date(t).getTime() >= currentHourTime);
+    if(foundIdx !== -1) startIdx = foundIdx;
+  }
+  const endIdx = startIdx + 8;
+
   let values = [];
   let unitSymbol = '°';
   let strokeColor = '#E8A33D';
 
   if(activeWeatherTab === 'temp'){
-    values = (weather.hourly.temperatures || []).slice(0, 8).map(t => Math.round(currentTempUnit==='C' ? t : (t*9/5)+32));
+    values = (weather.hourly.temperatures || []).slice(startIdx, endIdx).map(t => Math.round(currentTempUnit==='C' ? t : (t*9/5)+32));
     unitSymbol = '°';
     strokeColor = '#E8A33D';
   } else if(activeWeatherTab === 'precip'){
-    values = (weather.hourly.precipitationProb || [10,15,20,10,5,0,0,0]).slice(0, 8);
+    values = (weather.hourly.precipitationProb || [10,15,20,10,5,0,0,0]).slice(startIdx, endIdx);
     unitSymbol = '%';
     strokeColor = '#2563A6';
   } else if(activeWeatherTab === 'wind'){
-    values = (weather.hourly.windSpeeds || [12,14,13,15,11,10,9,8]).slice(0, 8).map(w => Math.round(w));
+    const rawWind = weather.hourly.windSpeed || weather.hourly.windSpeeds || [12,14,13,15,11,10,9,8];
+    values = rawWind.slice(startIdx, endIdx).map(w => Math.round(w));
     unitSymbol = ' km/h';
     strokeColor = '#2F9E5B';
   }
 
-  const times = (weather.hourly.times || []).slice(0, 8);
+  const times = (weather.hourly.times || []).slice(startIdx, endIdx);
   const minV = Math.min(...values) - (activeWeatherTab==='precip'?5:2);
   const maxV = Math.max(...values) + (activeWeatherTab==='precip'?10:2);
   const range = (maxV - minV) || 1;
@@ -536,8 +595,15 @@ function renderGoogleWeatherWidget(weather, locationName){
   const condText = document.getElementById('weatherConditionText');
   if(condText) condText.textContent = c.weatherDesc;
 
-  // (2026-07-13) Populate split detail spans; prev: single weatherDetailsLine
-  const precipProb = weather.hourly.precipitationProb && weather.hourly.precipitationProb.length ? weather.hourly.precipitationProb[0] : 0;
+  // (2026-07-13) Pull current hour precip prob; prev: hardcoded index 0
+  const now = new Date();
+  let curHourIdx = 0;
+  if(weather.hourly.times && weather.hourly.times.length){
+    const curTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours()).getTime();
+    const fIdx = weather.hourly.times.findIndex(t => new Date(t).getTime() >= curTime);
+    if(fIdx !== -1) curHourIdx = fIdx;
+  }
+  const precipProb = weather.hourly.precipitationProb && weather.hourly.precipitationProb.length ? (weather.hourly.precipitationProb[curHourIdx] ?? weather.hourly.precipitationProb[0]) : 0;
   const humVal = document.getElementById('weatherHumVal');
   if(humVal) humVal.textContent = `${c.humidity}%`;
   const windVal = document.getElementById('weatherWindVal');
@@ -565,13 +631,13 @@ function renderGoogleWeatherWidget(weather, locationName){
       const code = weather.daily.weatherCodes[i] || 0;
       const maxT = Math.round(currentTempUnit==='C' ? weather.daily.tempMax[i] : (weather.daily.tempMax[i]*9/5)+32);
       const minT = Math.round(currentTempUnit==='C' ? weather.daily.tempMin[i] : (weather.daily.tempMin[i]*9/5)+32);
-      // (2026-07-13) Google Weather style daily forecast cards with active day highlight; prev: basic column cells
+      // (2026-07-13) Rounded 2xl forecast cards with hover elevation; prev: 11px border
       const cell = document.createElement('div');
-      cell.className = `flex flex-col items-center py-2 px-2.5 text-center min-w-[56px] rounded-xl border flex-shrink-0 transition-all ${i===0 ? 'bg-forest text-white border-forest shadow-xs' : 'bg-white text-ink border-line/60 hover:border-forest/40'}`;
+      cell.className = `flex flex-col items-center py-2.5 px-3 text-center min-w-[62px] rounded-2xl border flex-shrink-0 transition-all ${i===0 ? 'bg-forest text-white border-forest shadow-sm scale-105' : 'bg-white text-ink border-line/60 hover:border-forest/40 shadow-2xs'}`;
       cell.innerHTML = `
-        <span class="text-[11px] font-semibold ${i===0?'text-white':'text-ink-soft'} leading-tight mb-1">${dayShort}</span>
-        <span class="text-[20px] leading-none my-1">${getWeatherIconEmoji(code)}</span>
-        <span class="text-[11px] font-bold ${i===0?'text-white':'text-ink'} leading-tight">${maxT}° <span class="font-normal ${i===0?'text-white/70':'text-ink-soft'}">${minT}°</span></span>
+        <span class="text-[11px] font-semibold ${i===0?'text-white/90':'text-ink-soft'} leading-tight mb-1">${dayShort}</span>
+        <span class="text-[22px] leading-none my-1.5 filter drop-shadow-xs">${getWeatherIconEmoji(code)}</span>
+        <span class="text-[11.5px] font-bold ${i===0?'text-white':'text-ink'} leading-tight">${maxT}° <span class="font-medium ${i===0?'text-white/70':'text-ink-soft/80'}">${minT}°</span></span>
       `;
       dailyStrip.appendChild(cell);
     });

@@ -236,62 +236,165 @@ const notificationManager = {
     }
   },
 
-  /* ================= CUSTOM NOTIFICATIONS ================= */
+// (2026-07-13) Batch stage transitions & offline missed push notifs; prev: single
+  /* ================= NOTIFICATION SCHEDULING & OFFLINE DISPATCH ================= */
   
-  // Daily reminders (7AM, 11AM, 6PM)
+  // Schedule all daily and custom reminders with Capacitor LocalNotifications
   async scheduleDailyReminders() {
-    if (!state.settings.sunReminder && !state.settings.heatReminder && !state.settings.nightReminder) {
-      return;
-    }
+    return this.scheduleAllReminders();
+  },
+
+  async scheduleAllReminders() {
+    if (!isCapacitor && !('Notification' in window)) return;
+    if (typeof state === 'undefined' || !state.settings) return;
+
+    await this.cancelAllNotifications();
 
     const now = new Date();
-    
-    // Morning sun reminder (7:00 AM)
+    let notifId = 100;
+
+    const parseNextTime = (hhmm) => {
+      const [h, m] = (hhmm || '08:00').split(':').map(Number);
+      const d = new Date();
+      d.setHours(h, m, 0, 0);
+      if (d <= now) d.setDate(d.getDate() + 1);
+      return d;
+    };
+
+    // Morning Sun
     if (state.settings.sunReminder) {
-      const morning = new Date();
-      morning.setHours(7, 0, 0, 0);
-      if (morning <= now) morning.setDate(morning.getDate() + 1);
-      
+      const target = parseNextTime(state.settings.sunTime || '07:00');
       await this.scheduleNotification({
         id: 1,
         title: '☀️ Morning Sun',
         body: 'Move your seedling trays into direct morning sun',
-        schedule: { at: morning, every: 'day' },
+        schedule: { at: target, every: 'day' },
         data: { page: 'reminders', type: 'sun' }
       });
     }
 
-    // Midday heat protection (11:00 AM)
+    // Midday Heat
     if (state.settings.heatReminder) {
-      const midday = new Date();
-      midday.setHours(11, 0, 0, 0);
-      if (midday <= now) midday.setDate(midday.getDate() + 1);
-      
+      const target = parseNextTime(state.settings.heatTime || '11:00');
       await this.scheduleNotification({
         id: 2,
         title: '🌡️ Heat Protection',
         body: 'Move trays to partial shade — scorching midday heat',
-        schedule: { at: midday, every: 'day' },
+        schedule: { at: target, every: 'day' },
         data: { page: 'reminders', type: 'heat' }
       });
     }
 
-    // Night darkness (6:00 PM)
+    // Night Darkness
     if (state.settings.nightReminder) {
-      const evening = new Date();
-      evening.setHours(18, 0, 0, 0);
-      if (evening <= now) evening.setDate(evening.getDate() + 1);
-      
+      const target = parseNextTime(state.settings.nightTime || '18:00');
       await this.scheduleNotification({
         id: 3,
         title: '🌙 Night Darkness',
         body: 'Turn off porch lights — plants need full darkness',
-        schedule: { at: evening, every: 'day' },
+        schedule: { at: target, every: 'day' },
         data: { page: 'reminders', type: 'night' }
       });
     }
 
-    showToast('Daily reminders scheduled', 'forest', 'bell');
+    // Active Custom Reminders
+    const customReminders = Array.isArray(state.settings.customReminders) ? state.settings.customReminders : [];
+    for (const r of customReminders) {
+      if (r.active) {
+        notifId++;
+        const target = parseNextTime(r.time || '09:00');
+        await this.scheduleNotification({
+          id: notifId,
+          title: '⏰ ' + r.title,
+          body: 'Reminder: ' + r.title,
+          schedule: { at: target, every: 'day' },
+          data: { page: 'reminders', type: 'custom', remId: r.id }
+        });
+      }
+    }
+  },
+
+  // Check stage transitions and offline missed events (Facebook-style catch-up)
+  checkOfflineAndStageTransitions() {
+    if (typeof state === 'undefined' || !state.towers) return;
+
+    let delivered = {};
+    try {
+      delivered = JSON.parse(localStorage.getItem('ht_delivered_notifs') || '{}');
+    } catch(e){ delivered = {}; }
+
+    const lastCheck = Number(localStorage.getItem('ht_last_notif_check')) || 0;
+    const now = Date.now();
+    const today = (typeof todayISO === 'function') ? todayISO() : new Date().toISOString().slice(0,10);
+
+    // Group stage transitions across trays and pockets
+    const stageGroups = {};
+
+    // Check Nursery Trays
+    if (Array.isArray(state.trays)) {
+      state.trays.forEach(t => {
+        if (!t.variety || !t.startDate) return;
+        const day = (typeof dayOfCycle === 'function') ? dayOfCycle(t.startDate) : 1;
+        const stage = (typeof stageForDay === 'function') ? stageForDay(day) : { key:'seedling', label:'Seedling' };
+        const key = `tray_${t.variety}_${stage.key}_${today}`;
+        if (!stageGroups[key]) {
+          stageGroups[key] = { type: 'tray', variety: t.variety, stageKey: stage.key, stageLabel: stage.label, count: 0, items: [] };
+        }
+        stageGroups[key].count++;
+        stageGroups[key].items.push(t);
+      });
+    }
+
+    // Check Tower Pockets
+    if (Array.isArray(state.pockets)) {
+      state.pockets.forEach(p => {
+        if (!p.variety || !p.datePlanted) return;
+        const { stage } = (typeof getPocketState === 'function') ? getPocketState(p) : { stage: { key:'vegetative', label:'Vegetative' } };
+        if (!stage) return;
+        const key = `pocket_${p.variety}_${stage.key}_${today}`;
+        if (!stageGroups[key]) {
+          stageGroups[key] = { type: 'pocket', variety: p.variety, stageKey: stage.key, stageLabel: stage.label, count: 0, items: [] };
+        }
+        stageGroups[key].count++;
+        stageGroups[key].items.push(p);
+      });
+    }
+
+    // Send single grouped notification per variety and stage
+    Object.keys(stageGroups).forEach(groupKey => {
+      if (delivered[groupKey]) return; // Already delivered
+
+      const g = stageGroups[groupKey];
+      let msg = '';
+      if (g.type === 'tray') {
+        msg = (g.count === 1)
+          ? `Your ${g.variety} Seed Tray is in the ${g.stageLabel} Stage`
+          : `${g.count} ${g.variety} Seed Trays are in the ${g.stageLabel} Stage`;
+      } else {
+        msg = (g.count === 1)
+          ? `Your ${g.variety} plant is in the ${g.stageLabel} Stage`
+          : `${g.count} ${g.variety} plants are in the ${g.stageLabel} Stage`;
+      }
+
+      this.sendNotification('🌱 Stage Update', msg, { page: g.type === 'tray' ? 'nursery' : 'tower' });
+      if (typeof logActivityNotification === 'function') {
+        logActivityNotification('Stage Update', msg, 'sprout');
+      }
+      delivered[groupKey] = now;
+    });
+
+    // Clean up delivered records older than 14 days
+    const cutoff = now - (14 * 86400000);
+    Object.keys(delivered).forEach(k => {
+      if (typeof delivered[k] === 'number' && delivered[k] < cutoff) {
+        delete delivered[k];
+      }
+    });
+
+    try {
+      localStorage.setItem('ht_delivered_notifs', JSON.stringify(delivered));
+      localStorage.setItem('ht_last_notif_check', String(now));
+    } catch(e){}
   },
 
   // Weather alerts
@@ -332,9 +435,9 @@ const notificationManager = {
 
     try {
       const pending = await LocalNotifications.getPending();
-      if (pending.notifications.length > 0) {
+      if (pending && pending.notifications && pending.notifications.length > 0) {
         await LocalNotifications.cancel(pending);
-        console.log('🗑️ Cancelled all notifications');
+        console.log('🗑️ Cancelled previous scheduled notifications');
       }
     } catch (error) {
       console.error('❌ Failed to cancel notifications:', error);
@@ -369,19 +472,26 @@ const notificationManager = {
     new Notification(options.title, {
       body: options.body,
       icon: 'assets/icons/icon-192.png',
-      badge: 'assets/icons/icon-64.png',
-      tag: options.id || 'hydrotrack',
+      badge: 'assets/icons/logo.png',
+      tag: options.id ? String(options.id) : 'hydrogreen',
       data: options.data
     });
   }
 };
 
-/* ================= AUTO-INITIALIZE ================= */
+/* ================= AUTO-INITIALIZE & SYNC ================= */
 if (typeof document !== 'undefined') {
   document.addEventListener('DOMContentLoaded', () => {
-    // Wait a bit for app to load
     setTimeout(() => {
-      notificationManager.init();
-    }, 2000);
+      notificationManager.init().then(() => {
+        notificationManager.scheduleAllReminders();
+        notificationManager.checkOfflineAndStageTransitions();
+      });
+    }, 1500);
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      notificationManager.checkOfflineAndStageTransitions();
+    }
   });
 }

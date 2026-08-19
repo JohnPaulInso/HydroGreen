@@ -1,14 +1,18 @@
 apply plugin: 'com.android.application'
 
+// (2026-07-13) Clean build.gradle matching wallet app; prev: custom signing
 android {
+    // (2026-07-13) Set namespace to com.hydrotrack.app; prev: manager
     namespace = "com.hydrotrack.app"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
+        // (2026-07-13) Set applicationId to com.hydrotrack.app; prev: manager
         applicationId "com.hydrotrack.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        // (2026-07-13) Bump versionCode to 3 to force Android update; prev: versionCode 2
+        versionCode 3
+        versionName "1.0.2"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,10 +20,22 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // (2026-07-13) Clean buildTypes matching wallet app; prev: custom signing
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    applicationVariants.all { variant ->
+        variant.outputs.all { output ->
+            outputFileName = "hydrotrack.apk"
         }
     }
 }
@@ -30,6 +46,7 @@ repositories {
     }
 }
 
+// (2026-07-13) Add Google Play Services Auth dependencies; prev: default only
 dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
@@ -40,6 +57,10 @@ dependencies {
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
+
+    implementation platform('com.google.firebase:firebase-bom:33.1.2')
+    implementation 'com.google.android.gms:play-services-auth:21.2.0'
+    implementation 'com.google.firebase:firebase-auth'
 }
 
 apply from: 'capacitor.build.gradle'

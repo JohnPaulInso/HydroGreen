@@ -1,0 +1,86 @@
+╔════════════════════════════════════════════════════════════════╗
+║                   FIX SSL CERTIFICATE ERROR                    ║
+║                                                                ║
+║  Error: "unable to find valid certification path to target"   ║
+╚════════════════════════════════════════════════════════════════╝
+
+┌────────────────────────────────────────────────────────────────┐
+│ STEP 1: SET GRADLE JDK TO EMBEDDED (MOST IMPORTANT!)          │
+└────────────────────────────────────────────────────────────────┘
+
+In Android Studio:
+
+  1. Click: File → Settings (or press Ctrl+Alt+S)
+  
+  2. Navigate to:
+     Build, Execution, Deployment
+       → Build Tools
+         → Gradle
+  
+  3. Find: "Gradle JDK" dropdown
+  
+  4. Select: "Embedded JDK" or "jbr-17" or "jbr-21"
+     ⚠️  DO NOT select "JAVA_HOME" or any system Java
+  
+  5. Click: Apply
+  
+  6. Click: OK
+
+┌────────────────────────────────────────────────────────────────┐
+│ STEP 2: INVALIDATE CACHES                                      │
+└────────────────────────────────────────────────────────────────┘
+
+  1. Click: File → Invalidate Caches
+  
+  2. Check ALL boxes in the dialog
+  
+  3. Click: "Invalidate and Restart"
+  
+  4. Wait for Android Studio to restart (1 minute)
+
+┌────────────────────────────────────────────────────────────────┐
+│ STEP 3: BUILD YOUR APK                                         │
+└────────────────────────────────────────────────────────────────┘
+
+  1. Click: Build → Build Bundle(s) / APK(s) → Build APK(s)
+  
+  2. Wait 3-5 minutes
+  
+  3. Look for green notification: "APK(s) generated successfully"
+  
+  4. Click: "locate" link
+  
+  5. Find your APK: hydrotrack.apk ✓
+
+┌────────────────────────────────────────────────────────────────┐
+│ SUCCESS!                                                        │
+└────────────────────────────────────────────────────────────────┘
+
+Your APK is at:
+  android\app\build\outputs\apk\debug\hydrotrack.apk
+
+Copy it to your phone and install!
+
+┌────────────────────────────────────────────────────────────────┐
+│ STILL NOT WORKING?                                             │
+└────────────────────────────────────────────────────────────────┘
+
+See full troubleshooting guide:
+  docs\ANDROID_STUDIO_FIX.md
+
+Or quick steps:
+  docs\QUICK_FIX_STEPS.md
+
+═══════════════════════════════════════════════════════════════════
+
+KEY POINT: 
+
+The #1 reason builds fail is NOT using "Embedded JDK"
+
+Make sure Step 1 is done correctly!
+
+✓ Embedded JDK = Works
+✗ JAVA_HOME = SSL Errors
+✗ System Java = SSL Errors
+
+═══════════════════════════════════════════════════════════════════

@@ -1,149 +1,268 @@
-# HydroTrack (TowerCrop) — Offline Prototype
+# HydroTrack 🌱
 
-A fully self-contained hydroponic tower manager. No build step, no internet
-connection required, no CDNs. Everything needed to run it is already inside
-this folder.
+A fully self-contained hydroponic tower manager with real-time Firebase sync, offline support, and Android APK capability.
 
-## Run it
+---
+
+## 🚀 Quick Start
+
+### Run in Browser
 Open `index.html` in any modern browser (Chrome, Edge, Firefox, Safari).
-Double-clicking the file works — nothing to install.
 
-> Tip: some browsers restrict `localStorage` for pages opened directly via
-> `file://`. If your data doesn't seem to save, either (a) it's still fine —
-> most modern browsers allow it — or (b) serve the folder locally instead:
-> `python3 -m http.server 8000` from inside this folder, then visit
-> `http://localhost:8000`.
+### Build Android APK
+Run this script and follow the instructions:
+```bash
+BUILD-NOW.bat
+```
 
-## What's bundled (fully offline)
-- `css/tailwind.css` — a locally compiled Tailwind build (no CDN script).
-- `css/app.css` — hand-written styles for the tower diagram, chips, modals, toasts.
-- `js/icons.js` — the exact Lucide icons this app uses, extracted from the
-  official `lucide-static` npm package and inlined as local SVG strings.
-  Nothing is fetched from unpkg or any icon CDN at runtime, so icons always render.
-- `js/plants.js` — original hand-built SVG illustrations for each growth stage
-  (germination → cotyledon → thinning → transplant → vegetative → harvest).
-  These are custom vector art, not stock photos, so there's no copyright
-  concern and nothing to download.
-- `js/app.js` — all application logic.
+📚 **Full documentation:** See [`docs/`](docs/) folder
+- **[Build Guide](docs/BUILD_IN_ANDROID_STUDIO_NOW.md)** - How to build your APK
+- **[Documentation Index](docs/INDEX.md)** - All guides and references
 
-## Your tower, as configured
-The sample tower ships as **8 rows × 3 columns (24 pockets)**, matching your
-real build — one vertical cylinder with 8 tiers of pockets, sitting in a dark
-basin with a white lid, drawn to resemble the actual product rather than an
-abstract grid. Rows 1–2 are near harvest, 3–4 are mid-growth, 5–6 were just
-transplanted, and 7–8 are open so you can try assigning them. Use **"Add
-Row"** on the Tower page to grow it taller (any pocket count per row), or the
-trash icon inside a Row's inspector to remove one.
+---
 
-### Selecting pockets
-Three ways, depending on how many you're touching:
-- **Tap** a pocket (on the drawing or in a row's chip strip) to open it and
-  edit that one plant.
-- **Press and hold**, then **drag** across others — mouse or touch — to
-  multi-select a few, gallery-style.
-- Hit **Select** above the tower to enter selection mode outright — every
-  tap now just adds/removes a pocket, no holding required, and **Select
-  All** grabs the whole tower in one tap. This is the fastest way to bulk
-  the whole thing.
+## ✨ Features
 
-Once anything is selected, a bar at the bottom lets you bulk-assign a
-variety + days-old to everything selected, or clear it all at once. It
-automatically tucks itself away behind any open modal so it never overlaps
-your dialogs. Type in the search box above the tower to dim every pocket
-that isn't a matching variety.
+- **Offline-First:** Works without internet, all assets bundled
+- **Real-Time Sync:** Firebase Firestore integration with live updates
+- **Tower Management:** 24-pocket hydroponic tower with visual interface
+- **Growth Tracking:** Stage-based plant progression with illustrations
+- **Photo Gallery:** Unlimited photo storage with compression
+- **Multi-Select:** Bulk operations on pockets and photos
+- **Notifications:** Smart reminders for tower maintenance
+- **PWA Ready:** Installable as Progressive Web App
+- **Android APK:** Full native Android app support via Capacitor
 
-Each pocket cup shows the actual growth-stage illustration from the Growth
-Gallery (not a flat color dot) — tap any Growth Gallery card on the
-Dashboard to see that stage's day range and what to do during it.
+---
 
-## Data persistence & real-time Firebase sync
-Everything is saved to the browser's `localStorage` by default, through one
-small `store.*` module at the top of `js/app.js` — the app works fully
-offline out of the box.
+## 📱 What's Bundled (Fully Offline)
 
-**`js/cloud.js` adds genuine, working Firestore live sync** — not a stub. To
-turn it on:
+- `css/tailwind.css` - Locally compiled Tailwind (no CDN)
+- `css/app.css` - Custom styles for tower diagram, modals, animations
+- `js/icons.js` - Lucide icons inlined as SVG strings
+- `js/plants.js` - Custom SVG illustrations for growth stages
+- `js/app.js` - All application logic
+- `js/cloud.js` - Firebase sync integration
+- `assets/fonts/` - Montserrat font family (self-hosted)
+- `assets/icons/` - PWA icons (192, 512, maskable)
 
-1. Create a Firebase project at console.firebase.google.com, add a Web app,
-   and copy its config object.
-2. In the project, enable **Firestore Database** and **Authentication →
-   Sign-in method → Anonymous**.
-3. Set Firestore rules so a signed-in (anonymous) user can only touch their
-   own document, e.g.:
-   ```
-   match /hydrotrack_towers/{uid} {
-     allow read, write: if request.auth != null && request.auth.uid == uid;
-   }
-   ```
-4. In the app, go to **Grower Tools → Firebase Live Sync**, paste the config
-   as JSON, and click Connect.
+---
 
-From then on: every local change is pushed to a single Firestore document
-(`hydrotrack_towers/{uid}`) via `setDoc(..., {merge:true})`, debounced
-~600ms. An `onSnapshot` listener keeps every open tab/device in sync in
-real time — open the same URL with the same config on a second device and
-changes appear instantly on both, no refresh needed. The sidebar dot (and
-Tools page) shows live status: gray = offline, amber = connecting, green =
-synced, orange = error. The Firebase SDK itself is only fetched (from
-Google's official CDN) the moment you click Connect — the app never reaches
-out to the internet otherwise.
+## 🏗️ Tower Configuration
 
-Use **Grower Tools → Local Backup → Export Backup (JSON)** any time to
-download a full snapshot regardless of sync status.
+- **8 rows × 3 columns = 24 pockets** (matches physical build)
+- Visual tower drawing resembling actual product
+- Add/remove rows dynamically
+- Three selection modes: tap, drag, or select-all
+- Real-time growth stage visualization in each pocket
+- Search/filter by variety
 
-## Notifications
-Reminders (7AM sun / 11AM heat / 6PM darkness, rain & wind alerts) turn on
-automatically the moment you plant your first tray or pocket. Because
-browsers require a real click to grant notification permission, a banner
-appears on the Dashboard asking you to confirm — after that, real browser
-notifications fire on schedule as long as the tab stays open. This is a
-genuine `Notification` API integration, not a simulation.
+---
 
-## Look & feel
-- **Montserrat** end to end, self-hosted (`assets/fonts/*.woff2`, real
-  Firebase-safe `@font-face` rules in `css/app.css`) — no Google Fonts CDN.
-- Text selection is disabled on UI chrome (buttons, labels, nav) so it feels
-  like a native app rather than a webpage — inputs and textareas still
-  select normally. Buttons use `touch-action: manipulation` to kill the
-  300ms tap delay, and `overscroll-behavior: none` stops the rubber-band/
-  pull-to-refresh bounce.
+## 💾 Data Persistence
 
-## Packaging as an APK
-This is now a real installable PWA, which is what tools like PWABuilder,
-Bubblewrap (Trusted Web Activity), or Capacitor expect as input:
-- `manifest.json` — name, icons, `display: standalone`, theme color.
-- `service-worker.js` — caches the app shell for offline use; Firebase/
-  Firestore requests are always excluded so live sync never goes stale.
-- `assets/icons/` — 192, 512, and a maskable 512 variant.
+### Local Storage (Default)
+Everything saved to browser's `localStorage` - works fully offline.
 
-The service worker only registers over `http(s)://` (it's skipped on
-`file://`), so serve the folder — `python3 -m http.server 8000` for local
-testing — or upload it wherever you're pointing your APK wrapper at.
+### Firebase Sync (Optional)
+Real Firestore integration with live sync across devices:
 
-## Your Firebase project (pre-filled)
-The **Grower Tools → Firebase Live Sync** panel already has your
-`hydrotrack-2317` config pasted in — just click Connect. Before that works:
-1. Firebase console → **Authentication → Sign-in method → Anonymous** → enable it.
-2. Firebase console → **Firestore Database** → create it (production mode is fine).
-3. Firestore → **Rules**, paste:
-   ```
-   rules_version = '2';
-   service cloud.firestore {
-     match /databases/{database}/documents {
-       match /hydrotrack_towers/{uid} {
-         allow read, write: if request.auth != null && request.auth.uid == uid;
-       }
-     }
-   }
-   ```
-Note: I left out `getAnalytics()` from your snippet — Analytics needs a
-browser `measurementId` gtag context, isn't needed for the app to function,
-and would be one more network call at startup. Easy to add back later if
-you want it.
+1. Create Firebase project at [console.firebase.google.com](https://console.firebase.google.com)
+2. Enable **Firestore Database** and **Anonymous Authentication**
+3. Set Firestore security rules (see [Firebase Setup Guide](docs/FIREBASE_SETUP.md))
+4. In app: **Grower Tools → Firebase Live Sync** → paste config → Connect
 
-## Stage estimates
-Every pocket and tray now shows its **next transition** — e.g. "Transplant in
-2 days (Aug 10)" — computed from its planted/sown date against the standard
-germination → cotyledon → thinning → transplant → vegetative → harvest
-timeline. These also roll up into the Dashboard's "Upcoming Stage Changes"
-card, sorted soonest-first.
+Features:
+- Real-time sync across all devices/tabs
+- Debounced writes (~600ms)
+- Live status indicator (offline/connecting/synced/error)
+- Automatic conflict resolution
+
+---
+
+## 📸 Photo Management
+
+- **Unlimited photos** via Firestore subcollections
+- Automatic image compression (max 1200px, 80% quality)
+- Photo detail modal with swipe-to-close
+- Multi-select with long-press + drag
+- Delete confirmation modal
+- File size display
+
+---
+
+## 🔔 Notifications
+
+Automatic reminders for:
+- 7AM sun exposure
+- 11AM heat check
+- 6PM darkness
+- Rain & wind alerts
+
+Uses browser Notification API - permission requested on first plant.
+
+---
+
+## 📦 Build Android APK
+
+### Prerequisites
+- Android Studio installed
+- Node.js and npm
+
+### Build Steps
+
+**Option 1: Automated Script**
+```bash
+BUILD-NOW.bat
+```
+
+**Option 2: Manual**
+1. Open Android Studio
+2. File → Open → Select `android` folder
+3. File → Settings → Gradle → Set JDK to "Embedded JDK"
+4. File → Sync Project with Gradle Files
+5. Build → Build Bundle(s) / APK(s) → Build APK(s)
+6. Find `hydrotrack.apk` in `android/app/build/outputs/apk/debug/`
+
+📖 **Detailed guide:** [docs/BUILD_IN_ANDROID_STUDIO_NOW.md](docs/BUILD_IN_ANDROID_STUDIO_NOW.md)
+
+---
+
+## 🎨 Design
+
+- **Font:** Montserrat (self-hosted, all weights)
+- **Colors:** Green/emerald theme matching branding
+- **Mobile-First:** Touch-optimized, no tap delay
+- **Animations:** Smooth transitions, slide-in/fade effects
+- **Overscroll:** Disabled for native app feel
+
+---
+
+## 🛠️ Tech Stack
+
+- **Frontend:** Vanilla JavaScript (no framework)
+- **Styling:** Tailwind CSS + custom CSS
+- **Icons:** Lucide (inlined SVGs)
+- **Storage:** localStorage + Firestore
+- **Auth:** Firebase Anonymous Auth
+- **PWA:** Service Worker + Web Manifest
+- **Mobile:** Capacitor for Android APK
+- **Notifications:** Browser Notification API
+
+---
+
+## 📁 Project Structure
+
+```
+HydroTrack/
+├── BUILD-NOW.bat                # Build APK script
+├── README.md                    # This file
+├── index.html                   # Main app entry
+├── manifest.json                # PWA manifest
+├── service-worker.js            # Service worker for offline
+├── docs/                        # All documentation
+│   ├── INDEX.md                # Documentation index
+│   ├── BUILD_*.md              # Build guides
+│   ├── *_SETUP.md              # Setup guides
+│   └── *.md                    # Feature documentation
+├── android/                     # Capacitor Android project
+├── css/
+│   ├── app.css                 # Custom styles
+│   └── tailwind.css            # Tailwind build
+├── js/
+│   ├── app.js                  # Main application
+│   ├── cloud.js                # Firebase sync
+│   ├── icons.js                # Icon definitions
+│   ├── plants.js               # Growth stage SVGs
+│   ├── weather.js              # Weather logic
+│   └── notifications.js        # Notification system
+└── assets/
+    ├── fonts/                  # Montserrat fonts
+    └── icons/                  # PWA icons
+```
+
+---
+
+## 📚 Documentation
+
+All guides are in the [`docs/`](docs/) folder:
+
+### Getting Started
+- [Documentation Index](docs/INDEX.md)
+- [Start Here](docs/START_HERE.md)
+
+### Building APK
+- [Build in Android Studio NOW](docs/BUILD_IN_ANDROID_STUDIO_NOW.md) ⭐
+- [Build with Android Studio](docs/BUILD_WITH_ANDROID_STUDIO.md)
+- [Build Issue Solutions](docs/BUILD_ISSUE_SOLUTION.md)
+
+### Setup & Configuration
+- [Firebase Setup](docs/FIREBASE_SETUP.md)
+- [Google Auth Setup](docs/GOOGLE_AUTH_SETUP.md)
+- [Logo Integration](docs/LOGO_INTEGRATION_GUIDE.md)
+
+### Features
+- [Unlimited Photos Solution](docs/UNLIMITED_PHOTOS_SOLUTION.md)
+- [Photo Modal Sync](docs/PHOTO_MODAL_SYNC_GUIDE.md)
+- [Image Compression](docs/IMAGE_COMPRESSION_FIX.md)
+
+---
+
+## 🎯 Growth Stages
+
+Six stages with custom SVG illustrations:
+
+1. **Germination** (Days 0-7)
+2. **Cotyledon** (Days 7-14)
+3. **Thinning** (Days 14-21)
+4. **Transplant** (Days 21-28)
+5. **Vegetative** (Days 28-60)
+6. **Harvest** (Day 60+)
+
+Each pocket shows current stage illustration and countdown to next transition.
+
+---
+
+## 🔄 Real-Time Features
+
+- Live sync across devices when Firebase connected
+- Status indicator (dot in sidebar)
+- Automatic reconnection on network restore
+- Optimistic UI updates
+- Conflict-free merging
+
+---
+
+## 🌐 Browser Support
+
+- Chrome/Edge (Chromium): Full support
+- Firefox: Full support
+- Safari: Full support
+- Mobile browsers: Full support with touch gestures
+
+---
+
+## 💡 Tips
+
+- **First time?** Read [docs/START_HERE.md](docs/START_HERE.md)
+- **Building APK?** Run `BUILD-NOW.bat`
+- **Need help?** Check [docs/INDEX.md](docs/INDEX.md) for all guides
+- **Local dev?** Run `python3 -m http.server 8000` and visit http://localhost:8000
+
+---
+
+## 📄 License
+
+Private project - All rights reserved.
+
+---
+
+## 🚀 Ready to Build?
+
+```bash
+BUILD-NOW.bat
+```
+
+Then follow the on-screen instructions!
+
+For questions, see the [documentation](docs/INDEX.md).

@@ -4,14 +4,19 @@
   "description": "A fully self-contained hydroponic tower manager. No build step, no internet connection required, no CDNs. Everything needed to run it is already inside this folder.",
   "main": "service-worker.js",
   "scripts": {
-    "build": "node -e \"const fs=require('fs'); fs.rmSync('www', {recursive:true, force:true}); fs.mkdirSync('www'); ['index.html','manifest.json','service-worker.js'].forEach(f=>fs.existsSync(f)&&fs.copyFileSync(f,'www/'+f)); ['css','js','assets'].forEach(d=>fs.existsSync(d)&&fs.cpSync(d,'www/'+d, {recursive:true}));\"",
+    "sync-www": "cmd /c \"robocopy . www *.html *.css *.js *.json *.png *.jpg *.svg /S /XD node_modules android .git .vscode .gemini www /NFL /NDL /NJH /NJS /nc /ns /np & exit /b 0\"",
+    "build": "npm run sync-www",
     "sync": "npm run build && npx cap sync",
+    "open": "npx cap open android",
+    "android": "npm run build && npx cap sync android && npx cap open android",
+    "apk": "npm run sync && cd android && gradlew.bat assembleDebug",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@capacitor-firebase/authentication": "^8.3.0",
     "@capacitor/android": "^8.5.0",
     "@capacitor/app": "^8.1.1",
     "@capacitor/cli": "^8.5.0",
