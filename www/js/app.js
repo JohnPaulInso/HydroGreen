@@ -473,6 +473,7 @@ function renderPage(name){
 // (2026-07-13) Define MAX_TOASTS constant for showToast; prev: undefined variable
 const MAX_TOASTS = 3;
 
+// (2026-07-13) Apply uniform bg-forest styling on toasts; prev: dynamic tone
 function showToast(msg, tone='forest', iconName='info', opts){
   const wrap = document.getElementById('toastContainer');
   if(!wrap) return;
@@ -482,8 +483,7 @@ function showToast(msg, tone='forest', iconName='info', opts){
     existingToasts[0].remove();
   }
   const el = document.createElement('div');
-  const bg = { forest:'bg-forest', clay:'bg-clay', gold:'bg-gold' }[tone] || 'bg-forest';
-  el.className = `toast ${bg} text-white text-[13px] font-medium px-4 py-3 rounded-xl shadow-lg flex items-center justify-between gap-3 max-w-sm pointer-events-auto`;
+  el.className = 'toast bg-forest text-white text-[13px] font-medium px-4 py-3 rounded-xl shadow-lg flex items-center justify-between gap-3 max-w-sm pointer-events-auto';
   
   let actionHtml = '';
   if(opts && opts.actionLabel){
@@ -1115,40 +1115,41 @@ document.getElementById('btnSelectionAll')?.addEventListener('click', ()=>{
   updateSelectionVisuals(); renderSelectionBar();
 });
 document.getElementById('btnSelectionAssign')?.addEventListener('click', ()=>openBulkAssignModal());
-// (2026-07-13) Clear plants in rows first before row deletion; prev: pocket level
+// (2026-07-13) Clear only selected pockets; prev: cleared entire target rows
 document.getElementById('btnSelectionClear')?.addEventListener('click', async ()=>{
   if(selectionState.ids.size === 0) return;
   const selStr = new Set(Array.from(selectionState.ids).map(String));
   const selectedPockets = state.pockets.filter(p=>selStr.has(String(p.id)));
   if(selectedPockets.length === 0) return;
 
-  const targetRowIds = new Set(selectedPockets.map(p=>p.rowId).filter(Boolean));
-  if(targetRowIds.size === 0) return;
+  const selectedOccupied = selectedPockets.filter(p=>p.variety && String(p.variety).trim());
 
-  const allPocketsInTargetRows = state.pockets.filter(p=>targetRowIds.has(p.rowId));
-  const occupiedPockets = allPocketsInTargetRows.filter(p=>p.variety && String(p.variety).trim());
-
-  if(occupiedPockets.length > 0){
-    if(!await showConfirm(`Clear ${occupiedPockets.length} plant(s) from selected row(s)?`, 'Clear Plants')) return;
+  if(selectedOccupied.length > 0){
+    if(!await showConfirm(`Clear ${selectedOccupied.length} selected plant(s)?`, 'Clear Plants')) return;
     const snapshotPockets = JSON.parse(JSON.stringify(state.pockets));
-    occupiedPockets.forEach(p=>{ p.variety = null; p.datePlanted = null; p.override = null; });
+    selectedOccupied.forEach(p=>{ p.variety = null; p.datePlanted = null; p.override = null; });
     persist('pockets'); exitSelectionMode(); renderTower();
-    showToast(`Cleared ${occupiedPockets.length} plant(s)`, 'clay', 'trash-2');
-    triggerUndoSnackbar(`Cleared ${occupiedPockets.length} plant(s)`, ()=>{
+    showToast(`Cleared ${selectedOccupied.length} plant(s)`, 'clay', 'trash-2');
+    triggerUndoSnackbar(`Cleared ${selectedOccupied.length} plant(s)`, ()=>{
       state.pockets = snapshotPockets;
       persist('pockets'); renderTower();
     });
   } else {
     const activeTower = getActiveTower();
     const activeTowerRows = state.rows.filter(r=>(r.towerId||'t1')===activeTower.id);
-
-    // (2026-07-13) Min 3 rows protected for horizontal towers, 8 for vertical; prev: 8 fixed
     const minRows = activeTower.type === 'horizontal' ? 3 : 8;
     const protectedRowIds = new Set(activeTowerRows.slice(0, minRows).map(r=>r.id));
-    const rowsToDelete = activeTowerRows.filter(r=>targetRowIds.has(r.id) && !protectedRowIds.has(r.id));
+    const targetRowIds = new Set(selectedPockets.map(p=>p.rowId).filter(Boolean));
+
+    const rowsToDelete = activeTowerRows.filter(r=>{
+      if(protectedRowIds.has(r.id) || !targetRowIds.has(r.id)) return false;
+      const rowPockets = state.pockets.filter(p=>p.rowId===r.id);
+      return rowPockets.length > 0 && rowPockets.every(p=>selStr.has(String(p.id)));
+    });
 
     if(rowsToDelete.length === 0){
-      showToast(`The first ${minRows} rows of the tower cannot be deleted`, 'clay', 'alert-triangle');
+      showToast(selectedPockets.length === 1 ? 'Selected pocket is already empty' : 'Selected pockets are already empty', 'forest', 'info');
+      exitSelectionMode();
       return;
     }
 
@@ -1356,10 +1357,9 @@ function renderTowerPhotoGallery(){
     visible.forEach((e, i)=>{
       const isLastAndHasMore = i === MAX_VISIBLE - 1 && overflow > 0;
       const overflowLabel = overflow >= 99 ? '99+' : `+${overflow}`;
-      // (2026-07-13) Object-cover & dark bottom gradient on grid tiles; prev: fit stretch
+      // (2026-07-13) Bullet separator and grayed stage in grid; prev: dash separator
       html += `<div class="photo-log-card group relative cursor-pointer rounded-2xl overflow-hidden bg-black shadow-sm border border-line/20 aspect-square" data-photo-id="${e.id}">
         <img src="${e.dataUrl}" style="width:100% !important; height:100% !important; object-fit:cover !important;" class="block ${isLastAndHasMore?'brightness-50':'group-hover:scale-105 transition-transform duration-300'}" alt="${e.variety} photo" loading="lazy">
-        // (2026-07-13) Soft gradient & z-20 pure white text overlay; prev: dark covered
         ${isLastAndHasMore ? `
           <div class="absolute inset-0 flex flex-col items-center justify-center text-white pointer-events-none bg-black/40 z-20">
             <div class="font-display font-bold text-[28px] leading-none">${overflowLabel}</div>
@@ -1367,8 +1367,7 @@ function renderTowerPhotoGallery(){
           </div>` : `
           <div style="position:absolute !important; bottom:0 !important; left:0 !important; right:0 !important; width:100% !important; height:50% !important; background:linear-gradient(to top, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.3) 60%, rgba(0,0,0,0) 100%) !important; pointer-events:none !important; z-index:5 !important;"></div>
           <div class="absolute inset-x-0 bottom-0 p-2 text-white pointer-events-none w-full overflow-hidden" style="z-index:20 !important;">
-            <div class="font-bold truncate text-white" style="font-size:10px !important; line-height:1.15; color:#FFFFFF !important; text-shadow:0 1px 3px rgba(0,0,0,0.9);">${e.variety}</div>
-            <div class="truncate mt-0.5" style="font-size:8.5px !important; line-height:1.1; color:#FFFFFF !important; opacity:0.9; text-shadow:0 1px 2px rgba(0,0,0,0.9);">${e.stage} · Day ${e.day}</div>
+            <div class="font-bold truncate text-white" style="font-size:10px !important; line-height:1.2; color:#FFFFFF !important; text-shadow:0 1px 3px rgba(0,0,0,0.9);">${e.day ? `Day ${e.day} <span style="opacity:0.65;font-weight:500;color:rgba(255,255,255,0.75);">· ${e.stage}</span>` : `<span style="opacity:0.65;font-weight:500;color:rgba(255,255,255,0.75);">${e.stage || 'Photo'}</span>`}</div>
           </div>`}
       </div>`;
     });

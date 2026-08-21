@@ -38,9 +38,12 @@ button, a, [role="button"], .tab-btn, .nav-btn{ touch-action:manipulation; }
 /* (2026-07-13) Safe area inset top padding for header & authOverlay; prev: 0.75rem */
 #appHeader { padding-top: max(0.75rem, env(safe-area-inset-top)); }
 @media (max-width: 767px) { #mainContent { padding-top: calc(4.75rem + env(safe-area-inset-top)) !important; } }
-#authOverlay { padding-top: max(1rem, env(safe-area-inset-top)); padding-bottom: max(1rem, env(safe-area-inset-bottom)); }
+/* (2026-07-13) Lock scroll during auth overlay; prev: free body scroll */
+#authOverlay { padding-top: max(1rem, env(safe-area-inset-top)); padding-bottom: max(1rem, env(safe-area-inset-bottom)); touch-action: none; overscroll-behavior: none; }
+body:has(#authOverlay:not(.hidden):not([style*="display: none"])) { overflow: hidden !important; touch-action: none; overscroll-behavior: none; }
 #bottomNav { padding-bottom: max(0.5rem, env(safe-area-inset-bottom)); }
-/* (2026-07-13) Set snackbar z-index under modals; prev: over modals */
+/* (2026-07-13) Set selectionBar above toastContainer; prev: toast above */
+#selectionBar { z-index: 16000 !important; }
 #undoSnackbar, #toastContainer { bottom: max(5.5rem, calc(4.5rem + env(safe-area-inset-bottom))); z-index: 15000 !important; }
 @keyframes pageFadeIn{ from{opacity:0; transform:scale(0.992) translateY(3px)} to{opacity:1; transform:scale(1) translateY(0)} }
 /* (2026-07-13) Add lightbox slide animations; prev: static transition */

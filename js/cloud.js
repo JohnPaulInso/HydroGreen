@@ -560,10 +560,12 @@ function updateUserUI(user){
 }
 
 /* ---- Login overlay ---- */
-// (2026-07-13) Force show auth overlay on logout; prev: blocked by CSS style
+// (2026-07-13) Prevent scroll during auth overlay; prev: free scrolling
 function showAuthOverlay(errored){
   const el = document.getElementById('authOverlay');
   if(!el) return;
+  document.body.style.overflow = 'hidden';
+  document.body.style.touchAction = 'none';
   const inlineStyle = document.getElementById('authOverlayInlineStyle');
   if(inlineStyle) inlineStyle.remove();
   document.querySelectorAll('style').forEach(s => {
@@ -581,6 +583,8 @@ function showAuthOverlay(errored){
 
 // (2026-07-13) Auto-run bootAuth & dismiss skeleton; prev: uninvoked on load
 function hideAuthOverlay(){
+  document.body.style.overflow = '';
+  document.body.style.touchAction = '';
   const overlay = document.getElementById('authOverlay');
   const skeleton = document.getElementById('dashboardSkeletonOverlay');
   if(skeleton) skeleton.classList.add('hidden');

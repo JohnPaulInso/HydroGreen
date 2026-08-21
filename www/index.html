@@ -34,9 +34,9 @@
 </div>
 
 <!-- ============ LOGIN OVERLAY ============ -->
-<!-- (2026-07-13) Add ID to authOverlayInlineStyle tag; prev: anonymous style -->
 <script>if(localStorage.getItem('ht_logged_in')==='true'){document.write('<style id="authOverlayInlineStyle">#authOverlay{display:none !important;}</style>');}</script>
-<div id="authOverlay" class="fixed inset-0 flex items-center justify-center p-6 overflow-hidden" style="position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:99999;background:radial-gradient(circle at 50% 30%, #17422b 0%, #0d2c1c 60%, #06170e 100%);padding-top:max(1.5rem, env(safe-area-inset-top));" role="dialog" aria-modal="true" aria-labelledby="authOverlayTitle">
+<!-- (2026-07-13) Lock touch and scroll on authOverlay; prev: scrollable -->
+<div id="authOverlay" class="fixed inset-0 flex items-center justify-center p-6 overflow-hidden select-none touch-none" style="position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:99999;background:radial-gradient(circle at 50% 30%, #17422b 0%, #0d2c1c 60%, #06170e 100%);padding-top:max(1.5rem, env(safe-area-inset-top));overscroll-behavior:none;touch-action:none;" role="dialog" aria-modal="true" aria-labelledby="authOverlayTitle">
 
   <!-- Ambient emerald center lighting -->
   <div aria-hidden="true" class="absolute inset-0 pointer-events-none" style="background:radial-gradient(ellipse 65% 50% at 50% 45%, rgba(52,211,153,0.14) 0%, transparent 75%);"></div>
