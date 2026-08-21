@@ -63,7 +63,11 @@ button, a, [role="button"], .tab-btn, .nav-btn{ touch-action:manipulation; }
 .onboarding-desc { color:rgba(236,253,245,0.85) !important; font-size:13.5px !important; line-height:1.55 !important; margin-bottom:20px !important; }
 .onboarding-chip { display:inline-flex; align-items:center; gap:5px; padding:5px 10px; border-radius:10px; background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.12); color:#d1fae5; font-size:11.5px; font-weight:500; }
 .onboarding-btn-google { width:100%; background:#ffffff !important; color:#0f3822 !important; font-weight:700 !important; font-size:14px !important; padding:13px 16px !important; border-radius:16px !important; display:flex !important; align-items:center !important; justify-content:center !important; gap:10px !important; box-shadow:0 4px 18px rgba(0,0,0,0.35) !important; border:none !important; cursor:pointer !important; position:relative !important; z-index:50 !important; pointer-events:auto !important; transition:transform 0.15s ease, background 0.15s ease !important; }
-.onboarding-btn-google:hover { background:#f0fdf4 !important; transform:translateY(-1px); }
+/* (2026-07-13) Wrap google btn hover in media query; prev: unwrapped */
+@media (hover: hover) {
+  .onboarding-btn-google:hover { background:#f0fdf4 !important; transform:translateY(-1px); }
+}
+.onboarding-btn-google:active { transform: scale(0.98); }
 
 .animate-fade-in { animation: pageFadeIn 0.18s ease-out forwards; }
 /* (2026-07-13) Subtle low-opacity shimmer sweep for skeleton bars; prev: high contrast white */
@@ -90,7 +94,10 @@ button, a, [role="button"], .tab-btn, .nav-btn{ touch-action:manipulation; }
 .tab-dot{ opacity:0; transform:scale(.4); transition:.2s ease; }
 
 .pocket-btn, .pocket-chip{ transition: transform .18s ease, box-shadow .18s ease; }
-.pocket-btn:hover, .pocket-chip:hover{ transform: translateY(-2px) scale(1.04); }
+/* (2026-07-13) Wrap pocket hover in hover query; prev: unwrapped hover */
+@media (hover: hover) {
+  .pocket-btn:hover, .pocket-chip:hover{ transform: translateY(-2px) scale(1.04); }
+}
 .pocket-btn:active, .pocket-chip:active{ transform: scale(.97); }
 
 .status-seedling{ background:#FDF3D8; border-color:#EFCB5A; }
@@ -154,7 +161,11 @@ body.a11y-reduce-motion *, body.a11y-reduce-motion *::before, body.a11y-reduce-m
   animation-duration:.001s !important; transition-duration:.001s !important;
 }
 .tower-pocket{ cursor:pointer; touch-action:none; }
-.tower-pocket:hover .pocket-fill{ filter:brightness(1.08); }
+/* (2026-07-13) Wrap tower pocket hover; prev: unwrapped hover effect */
+@media (hover: hover) {
+  .tower-pocket:hover .pocket-fill{ filter:brightness(1.08); }
+}
+.tower-pocket:active .pocket-fill{ filter:brightness(1.12); }
 
 /* (2026-07-13) Fix pocket select ring transform alignment; prev: no transform-box */
 .pocket-select-ring {
@@ -272,10 +283,16 @@ body.a11y-reduce-motion *, body.a11y-reduce-motion *::before, body.a11y-reduce-m
   box-shadow: 0 1px 3px rgba(20, 83, 45, 0.05);
 }
 
-.row-card:hover {
-  border-color: #2F9E5B;
-  box-shadow: 0 4px 12px rgba(47, 158, 91, 0.15);
-  transform: translateY(-2px);
+/* (2026-07-13) Wrap row-card hover & add active; prev: unwrapped hover */
+@media (hover: hover) {
+  .row-card:hover {
+    border-color: #2F9E5B;
+    box-shadow: 0 4px 12px rgba(47, 158, 91, 0.15);
+    transform: translateY(-2px);
+  }
+}
+.row-card:active {
+  transform: scale(0.99);
 }
 
 .row-card-header {
@@ -333,14 +350,23 @@ body.a11y-reduce-motion *, body.a11y-reduce-motion *::before, body.a11y-reduce-m
   overflow: hidden;
 }
 
-.row-pocket-chip:hover {
-  transform: scale(1.1) rotate(5deg);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
-  z-index: 10;
+/* (2026-07-13) Wrap row pocket hover & add active; prev: unwrapped hover */
+@media (hover: hover) {
+  .row-pocket-chip:hover {
+    transform: scale(1.1) rotate(5deg);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+    z-index: 10;
+  }
+  .row-pocket-chip:hover::before {
+    opacity: 1;
+  }
 }
 
 .row-pocket-chip:active {
   transform: scale(0.95);
+}
+.row-pocket-chip:active::before {
+  opacity: 1;
 }
 
 .row-pocket-chip::before {
@@ -350,10 +376,6 @@ body.a11y-reduce-motion *, body.a11y-reduce-motion *::before, body.a11y-reduce-m
   background: linear-gradient(135deg, rgba(255,255,255,0.3) 0%, rgba(255,255,255,0) 100%);
   opacity: 0;
   transition: opacity 0.2s;
-}
-
-.row-pocket-chip:hover::before {
-  opacity: 1;
 }
 
 /* (2026-07-13) Make pocket chips clean solid squares; prev: narrow dashed pill */
@@ -367,9 +389,12 @@ body.a11y-reduce-motion *, body.a11y-reduce-motion *::before, body.a11y-reduce-m
   background: #FAFCFA !important;
   transition: transform 0.18s ease, box-shadow 0.18s ease;
 }
-.pocket-chip:hover {
-  transform: translateY(-2px) scale(1.03);
-  box-shadow: 0 4px 10px rgba(0,0,0,0.06);
+/* (2026-07-13) Wrap pocket chip hover; prev: unwrapped hover effect */
+@media (hover: hover) {
+  .pocket-chip:hover {
+    transform: translateY(-2px) scale(1.03);
+    box-shadow: 0 4px 10px rgba(0,0,0,0.06);
+  }
 }
 .pocket-chip.status-empty {
   border-style: solid !important;
@@ -430,10 +455,18 @@ body.a11y-reduce-motion *, body.a11y-reduce-motion *::before, body.a11y-reduce-m
   color: white;
 }
 
-.row-action-btn-primary:hover {
-  background: #267a46;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(47, 158, 91, 0.3);
+/* (2026-07-13) Wrap row action hover states; prev: unwrapped hover rules */
+@media (hover: hover) {
+  .row-action-btn-primary:hover {
+    background: #267a46;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(47, 158, 91, 0.3);
+  }
+
+  .row-action-btn-secondary:hover {
+    background: #E2E8E4;
+    color: #14532D;
+  }
 }
 
 .row-action-btn-secondary {
@@ -441,10 +474,6 @@ body.a11y-reduce-motion *, body.a11y-reduce-motion *::before, body.a11y-reduce-m
   color: #5B6B64;
 }
 
-.row-action-btn-secondary:hover {
-  background: #E2E8E4;
-  color: #14532D;
-}
 
 .row-action-btn:active {
   transform: scale(0.97);
@@ -497,9 +526,15 @@ body.a11y-reduce-motion *, body.a11y-reduce-motion *::before, body.a11y-reduce-m
   transition: all 0.15s ease !important;
 }
 
-.nursery-cell-cube:hover {
-  background-color: #384239 !important;
-  border-color: #52B774 !important;
+/* (2026-07-13) Wrap nursery cube hover & add active; prev: raw hover */
+@media (hover: hover) {
+  .nursery-cell-cube:hover {
+    background-color: #384239 !important;
+    border-color: #52B774 !important;
+  }
+}
+.nursery-cell-cube:active {
+  transform: scale(0.95);
 }
 
 .nursery-cell-cube.selected {

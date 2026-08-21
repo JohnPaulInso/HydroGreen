@@ -64,6 +64,10 @@ const cloudSync = {
           hideAuthOverlay();
           localStorage.removeItem(OFFLINE_MODE_KEY);
           connectFirestoreForUser(user);
+          // (2026-07-13) Dismiss One Tap after login; prev: prompt remained visible
+          if(typeof google !== 'undefined' && google?.accounts?.id?.cancel){
+            google.accounts.id.cancel();
+          }
         } else {
           localStorage.setItem('ht_logged_in', 'false');
           this.connected = false;
@@ -93,12 +97,20 @@ const cloudSync = {
 
   // (2026-07-13) Poll GIS SDK load & render GIS button; prev: direct call
   initGoogleOneTap(){
+    if(this.user || localStorage.getItem('ht_logged_in') === 'true'){
+      if(typeof google !== 'undefined' && google?.accounts?.id?.cancel) google.accounts.id.cancel();
+      return;
+    }
     if(window.Capacitor?.isNativePlatform?.()){
       this.authLog('Native platform active — One Tap handled by Android Google Play Services.');
       return;
     }
     const self = this;
     function setupGIS(){
+      if(self.user || localStorage.getItem('ht_logged_in') === 'true'){
+        if(typeof google !== 'undefined' && google?.accounts?.id?.cancel) google.accounts.id.cancel();
+        return;
+      }
       if(typeof google === 'undefined' || !google?.accounts?.id){
         self.authLog('Google Identity Services SDK script not loaded yet.', true);
         return;
@@ -230,11 +242,7 @@ const cloudSync = {
         return null;
       }
 
-      // Web flow with Google One-Tap & redirect fallback
-      if(typeof google !== 'undefined' && google?.accounts?.id){
-        this.authLog('Requesting Google One-Tap prompt…');
-        google.accounts.id.prompt();
-      }
+      // (2026-07-13) Use popup auth flow directly; prev: triggered one-tap prompt
       this.authLog('Opening Google Auth popup window…');
       const provider = new this.fns.GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' });
@@ -245,8 +253,13 @@ const cloudSync = {
         return result.user;
       } catch(popupErr) {
         this.authLog('Popup error code: ' + popupErr.code + ' — ' + popupErr.message, true);
-        if(popupErr.code === 'auth/popup-blocked' || popupErr.code === 'auth/popup-closed-by-user'){
-          this.authLog('Popup blocked/closed. Redirecting to Google Auth…');
+        // (2026-07-13) Reset button if popup closed; prev: redirected and stayed stuck
+        if(popupErr.code === 'auth/popup-closed-by-user' || popupErr.code === 'auth/cancelled-popup-request'){
+          this.authLog('Sign-in cancelled or closed by user.');
+          return null;
+        }
+        if(popupErr.code === 'auth/popup-blocked'){
+          this.authLog('Popup blocked. Redirecting to Google Auth…');
           await this.fns.signInWithRedirect(this.auth, provider);
           return null;
         }
@@ -258,16 +271,16 @@ const cloudSync = {
         this.authLog('💡 Setup Needed: Add package com.hydrotrack.app & SHA1 ED:36:13:B1:CA:6D:DE:62:45:58:85:D2:C5:61:50:59:D7:20:63:2D in your Firebase Console.', true);
       }
       if(err.code === 'auth/unauthorized-domain') showToast('Domain not authorized in Firebase Console (' + window.location.hostname + ')', 'clay', 'alert-triangle');
-      else if(err.code!=='auth/popup-closed-by-user') showToast('Sign-in failed: '+err.message,'clay','alert-triangle');
+      else if(err.code!=='auth/popup-closed-by-user' && err.code!=='auth/cancelled-popup-request') showToast('Sign-in failed: '+err.message,'clay','alert-triangle');
       return null;
     } finally {
       const elapsed = Date.now() - startTime;
-      const minWait = 800;
+      const minWait = 400;
       if(elapsed < minWait) await new Promise(r => setTimeout(r, minWait - elapsed));
       if(btnOverlay){
         btnOverlay.removeAttribute('disabled');
-        btnOverlay.style.opacity = '1';
-        btnOverlay.style.pointerEvents = 'auto';
+        btnOverlay.style.opacity = '';
+        btnOverlay.style.pointerEvents = '';
         btnOverlay.innerHTML = origHtml;
       }
     }
