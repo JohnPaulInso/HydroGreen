@@ -31,7 +31,7 @@ const DEFAULT_FIREBASE_CONFIG = {
 };
 
 const cloudSync = {
-  app:null, db:null, auth:null, user:null, unsub:null, ref:null,
+  app:null, db:null, auth:null, user:null, unsub:null, unsubPhotos:null, ref:null,
   connected:false, connecting:false, applyingRemote:false, pushTimer:null,
   authReady:false, fns:{},
 
@@ -295,6 +295,7 @@ const cloudSync = {
     // (2026-07-13) Cancel pending push timer on logout; prev: timer could fire
     if(this.pushTimer){ clearTimeout(this.pushTimer); this.pushTimer = null; }
     if(this.unsub){ this.unsub(); this.unsub=null; }
+    if(this.unsubPhotos){ this.unsubPhotos(); this.unsubPhotos=null; }
     this.connected = false; this.ref = null;
     this.user = null;
 
@@ -361,9 +362,9 @@ const cloudSync = {
     }
   },
 
-  // (2026-07-13) Sync photos under hydrotrack_towers; prev: users
+  // (2026-07-13) Direct photo document sync; prev: blocked by connected check
   async syncPhoto(photo){
-    if(!this.db || !this.user || !this.connected) return;
+    if(!this.db || !this.user) return;
     try{
       const photosRef = this.fns.collection(this.db, 'hydrotrack_towers', this.user.uid, 'photos');
       const photoDocRef = this.fns.doc(photosRef, String(photo.id));
@@ -372,7 +373,7 @@ const cloudSync = {
   },
 
   async deletePhoto(photoId){
-    if(!this.db || !this.user || !this.connected) return;
+    if(!this.db || !this.user) return;
     try{
       const photosRef = this.fns.collection(this.db, 'hydrotrack_towers', this.user.uid, 'photos');
       const photoDocRef = this.fns.doc(photosRef, String(photoId));
@@ -381,7 +382,7 @@ const cloudSync = {
   },
 
   async loadPhotos(){
-    if(!this.db || !this.user || !this.connected) return [];
+    if(!this.db || !this.user) return [];
     try{
       const photosRef = this.fns.collection(this.db, 'hydrotrack_towers', this.user.uid, 'photos');
       const q = this.fns.query(photosRef, this.fns.orderBy('loggedAt', 'desc'), this.fns.limit(100));
@@ -395,12 +396,13 @@ const cloudSync = {
 };
 
 /* ---- Per-user Firestore document: subscribe, and seed on first login ---- */
-// (2026-07-13) Use hydrotrack_towers path to match Firestore rules; prev: users
+// (2026-07-13) Subscribe to photos subcollection; prev: unobserved subcollection
 async function connectFirestoreForUser(user){
   if(!user || !user.uid) return;
   const userDocRef = cloudSync.fns.doc(cloudSync.db, 'hydrotrack_towers', String(user.uid));
   cloudSync.ref = userDocRef;
   if(cloudSync.unsub) cloudSync.unsub();
+  if(cloudSync.unsubPhotos){ cloudSync.unsubPhotos(); cloudSync.unsubPhotos = null; }
   updateSyncStatus('connecting');
 
   try {
@@ -444,6 +446,29 @@ async function connectFirestoreForUser(user){
     cloudSync.connected = false;
     updateSyncStatus('error', err.message);
   });
+
+  try {
+    const photosRef = cloudSync.fns.collection(cloudSync.db, 'hydrotrack_towers', String(user.uid), 'photos');
+    const q = cloudSync.fns.query(photosRef, cloudSync.fns.orderBy('loggedAt', 'desc'), cloudSync.fns.limit(100));
+    cloudSync.unsubPhotos = cloudSync.fns.onSnapshot(q, (snapshot)=>{
+      const remotePhotos = snapshot.docs.map(doc => doc.data());
+      if(remotePhotos.length > 0){
+        state.photoLog = remotePhotos;
+        store.set(KEYS.photoLog, remotePhotos);
+        if(typeof renderTowerPhotoGallery === 'function') renderTowerPhotoGallery();
+      }
+      if(Array.isArray(state.photoLog) && state.photoLog.length > 0){
+        const remoteIds = new Set(remotePhotos.map(p => String(p.id)));
+        state.photoLog.forEach(localP => {
+          if(!remoteIds.has(String(localP.id))) cloudSync.syncPhoto(localP);
+        });
+      }
+    }, (err)=>{
+      console.error('Photo collection sync error:', err);
+    });
+  } catch(photoErr){
+    console.error('Failed to subscribe photos:', photoErr);
+  }
 }
 
 // (2026-07-13) Isolated clean state for new users; prev: copied prior session
@@ -513,13 +538,14 @@ function applyRemoteState(remote){
   if(typeof renderCustomReminders==='function') renderCustomReminders();
 }
 
-// (2026-07-13) Load photos from Firestore subcollection
+// (2026-07-13) Load photos and refresh gallery; prev: dashboard only
 async function loadPhotosFromCloud(){
   try{
     const photos = await cloudSync.loadPhotos();
     if(photos.length > 0){
       state.photoLog = photos;
       store.set(KEYS.photoLog, photos);
+      if(typeof renderTowerPhotoGallery==='function') renderTowerPhotoGallery();
       if(typeof renderPage==='function') renderPage(typeof currentPageName==='function' ? currentPageName() : 'dashboard');
     }
   } catch(err){

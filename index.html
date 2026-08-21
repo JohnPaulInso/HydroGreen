@@ -374,8 +374,8 @@
 
       <!-- (2026-07-13) Restore towerVisualizerCard wrapper div & spacing; prev: unclosed div -->
       <div id="towerVisualizerCard" class="mt-4 bg-white rounded-2xl shadow-card border border-line p-5 md:p-7">
-        <!-- (2026-07-13) Prevent touch scroll during drag select; prev: touch-pan-y -->
-        <div id="towerDiagram" class="mx-auto touch-none" style="touch-action:none;"></div>
+        <!-- (2026-07-13) Allow vertical touch pan on tower diagram; prev: touch-none -->
+        <div id="towerDiagram" class="mx-auto" style="touch-action:pan-y;"></div>
         <div class="flex items-center justify-between mt-3 pt-3 border-t border-line/60 gap-3 flex-wrap">
           <p id="towerInstructions" class="text-[11.5px] text-ink-soft flex-1 min-w-[180px]">Tap a pocket to edit it · press and hold, then drag, to select several at once.</p>
           <button id="btnAddRow" type="button" class="text-[12.5px] font-semibold text-white bg-forest px-3.5 py-2 rounded-lg flex items-center gap-1.5 flex-shrink-0" data-icon="list-plus">Add Row</button>

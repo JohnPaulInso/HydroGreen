@@ -37,7 +37,55 @@ button, a, [role="button"], .tab-btn, .nav-btn{ touch-action:manipulation; }
 }
 /* (2026-07-13) Safe area inset top padding for header & authOverlay; prev: 0.75rem */
 #appHeader { padding-top: max(0.75rem, env(safe-area-inset-top)); }
-@media (max-width: 767px) { #mainContent { padding-top: calc(4.75rem + env(safe-area-inset-top)) !important; } }
+/* (2026-07-13) App shell with pinned headers & nav; prev: free window scroll */
+@media (max-width: 767px) {
+  html, body {
+    height: 100%;
+    height: 100dvh;
+    overflow: hidden;
+    position: fixed;
+    width: 100%;
+    overscroll-behavior: none !important;
+  }
+  #app {
+    height: 100%;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+    width: 100%;
+  }
+  #appHeader {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1000 !important;
+    flex-shrink: 0;
+    overscroll-behavior: none !important;
+  }
+  #mainContent {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    overscroll-behavior-y: contain;
+    padding-top: calc(4.75rem + env(safe-area-inset-top)) !important;
+    padding-bottom: calc(5.5rem + env(safe-area-inset-bottom)) !important;
+    height: 100%;
+    width: 100%;
+  }
+  #bottomNav {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 1000 !important;
+    flex-shrink: 0;
+    overscroll-behavior: none !important;
+  }
+}
 /* (2026-07-13) Lock scroll during auth overlay; prev: free body scroll */
 #authOverlay { padding-top: max(1rem, env(safe-area-inset-top)); padding-bottom: max(1rem, env(safe-area-inset-bottom)); touch-action: none; overscroll-behavior: none; }
 body:has(#authOverlay:not(.hidden):not([style*="display: none"])) { overflow: hidden !important; touch-action: none; overscroll-behavior: none; }
@@ -163,7 +211,8 @@ body.a11y-high-contrast .border-line{ border-color:#94A39A !important; }
 body.a11y-reduce-motion *, body.a11y-reduce-motion *::before, body.a11y-reduce-motion *::after{
   animation-duration:.001s !important; transition-duration:.001s !important;
 }
-.tower-pocket{ cursor:pointer; touch-action:none; }
+/* (2026-07-13) Allow vertical touch pan on tower pockets; prev: touch-none */
+.tower-pocket{ cursor:pointer; touch-action:pan-y; }
 /* (2026-07-13) Wrap tower pocket hover; prev: unwrapped hover effect */
 @media (hover: hover) {
   .tower-pocket:hover .pocket-fill{ filter:brightness(1.08); }
@@ -519,12 +568,12 @@ body.a11y-reduce-motion *, body.a11y-reduce-motion *::before, body.a11y-reduce-m
   box-shadow: inset 0 2px 6px rgba(0,0,0,0.5) !important;
 }
 
-/* (2026-07-13) touch-action:none on cell cubes for drag select/unselect; prev: touch-pan-y */
+/* (2026-07-13) Allow vertical touch pan on nursery cubes; prev: touch-none */
 .nursery-cell-cube {
   background-color: #2D352E !important;
   border: 1px solid #3B463E !important;
   outline: none !important;
-  touch-action: none !important;
+  touch-action: pan-y !important;
   -webkit-tap-highlight-color: transparent;
   transition: all 0.15s ease !important;
 }
@@ -611,4 +660,92 @@ body.a11y-reduce-motion *, body.a11y-reduce-motion *::before, body.a11y-reduce-m
     transform: translateY(0);
     opacity: 1;
   }
+}
+
+/* (2026-07-13) Custom select dropdown component styles; prev: plain native select */
+.custom-select-wrapper {
+  position: relative;
+  width: 100%;
+  user-select: none;
+}
+.custom-select-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: #FFFFFF !important;
+  border: 1.5px solid #E2E8F0 !important;
+  border-radius: 10px !important;
+  padding: 8px 12px !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  color: #1C231F !important;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+  transition: all 0.15s ease;
+  text-align: left;
+}
+.custom-select-trigger:hover {
+  border-color: #2F9E5B !important;
+  background-color: #F8FAFC !important;
+}
+.custom-select-trigger.active {
+  border-color: #2F9E5B !important;
+  box-shadow: 0 0 0 3px rgba(47, 158, 91, 0.15) !important;
+}
+.custom-select-trigger .custom-select-arrow {
+  width: 16px;
+  height: 16px;
+  color: #64748B;
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+.custom-select-trigger.active .custom-select-arrow {
+  transform: rotate(180deg);
+  color: #2F9E5B;
+}
+.custom-select-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: #FFFFFF !important;
+  border: 1.5px solid #E2E8F0 !important;
+  border-radius: 12px !important;
+  box-shadow: 0 10px 25px -4px rgba(0, 0, 0, 0.12), 0 4px 10px rgba(0, 0, 0, 0.05) !important;
+  max-height: 200px;
+  overflow-y: auto;
+  z-index: 10000;
+  display: none;
+  padding: 4px;
+}
+.custom-select-menu.open {
+  display: block;
+}
+.custom-select-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: #1C231F;
+  cursor: pointer;
+  transition: background-color 0.12s, color 0.12s;
+}
+.custom-select-option:hover {
+  background-color: #DCF5E3 !important;
+  color: #14532D !important;
+  font-weight: 600;
+}
+.custom-select-option.selected {
+  background-color: #14532D !important;
+  color: #FFFFFF !important;
+  font-weight: 700;
+}
+.custom-select-option.is-custom-top {
+  border-bottom: 1px solid #E2E8F0;
+  margin-bottom: 4px;
+  padding-bottom: 8px;
 }

@@ -13,8 +13,9 @@ const KEYS = {
   photoLog:'ht_photo_log'
 };
 
-// (2026-07-13) Expand CROP_PRESETS with popular hydroponic seeds; prev: 8 presets
+// (2026-07-13) Move Custom Variety to top of presets; prev: placed at bottom
 const CROP_PRESETS = [
+  { name:'Custom Variety', totalDays:45 },
   { name:'Black Seeded Simpson', totalDays:45 },
   { name:'Lollo Rossa', totalDays:45 },
   { name:'Batavia Lettuce', totalDays:42 },
@@ -31,8 +32,7 @@ const CROP_PRESETS = [
   { name:'Kangkong', totalDays:30 },
   { name:'Mustard Greens', totalDays:35 },
   { name:'Swiss Chard', totalDays:45 },
-  { name:'Spring Onion', totalDays:40 },
-  { name:'Custom Variety', totalDays:45 }
+  { name:'Spring Onion', totalDays:40 }
 ];
 
 const STAGES = [
@@ -447,6 +447,9 @@ function performPageSwitch(name, pageEl, opts){
     b.setAttribute('aria-current', active ? 'page' : 'false');
   });
   renderPage(name);
+  // (2026-07-13) Reset mainContent scroll on page render; prev: window only
+  const mainEl = document.getElementById('mainContent');
+  if(mainEl) mainEl.scrollTop = 0;
   window.scrollTo({top:0,behavior:'instant'});
   if(opts?.fromNav){
     const heading = pageEl.querySelector('h1');
@@ -1175,11 +1178,89 @@ document.getElementById('btnSelectionClear')?.addEventListener('click', async ()
 });
 document.getElementById('btnSelectionCancel')?.addEventListener('click', exitSelectionMode);
 
+// (2026-07-13) Custom select dropdown with CSS & JS; prev: browser select
+function createCustomSelect(selectEl){
+  if(!selectEl) return;
+  const existingWrapper = selectEl.nextElementSibling;
+  if(existingWrapper && existingWrapper.classList.contains('custom-select-wrapper')){
+    existingWrapper.remove();
+  }
+  selectEl.style.display = 'none';
+  const wrapper = document.createElement('div');
+  wrapper.className = 'custom-select-wrapper';
+
+  const trigger = document.createElement('button');
+  trigger.type = 'button';
+  trigger.className = 'custom-select-trigger';
+
+  const selectedOpt = selectEl.options[selectEl.selectedIndex] || selectEl.options[0];
+  const labelText = selectedOpt ? selectedOpt.text : 'Select variety…';
+
+  trigger.innerHTML = `
+    <span class="custom-select-label truncate">${labelText}</span>
+    <svg class="custom-select-arrow" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+  `;
+
+  const menu = document.createElement('div');
+  menu.className = 'custom-select-menu';
+
+  Array.from(selectEl.options).forEach(opt=>{
+    const optDiv = document.createElement('div');
+    const isSelected = opt.value === selectEl.value;
+    optDiv.className = `custom-select-option ${isSelected ? 'selected' : ''} ${opt.value === 'Custom Variety' ? 'is-custom-top' : ''}`;
+    optDiv.dataset.value = opt.value;
+    optDiv.innerHTML = `
+      <span class="truncate">${opt.text}</span>
+      ${isSelected ? `<svg class="w-3.5 h-3.5 text-current flex-shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>` : ''}
+    `;
+
+    optDiv.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      selectEl.value = opt.value;
+      trigger.querySelector('.custom-select-label').textContent = opt.text;
+      menu.querySelectorAll('.custom-select-option').forEach(o=>{
+        const isSel = o.dataset.value === opt.value;
+        o.className = `custom-select-option ${isSel ? 'selected' : ''} ${o.dataset.value === 'Custom Variety' ? 'is-custom-top' : ''}`;
+        o.innerHTML = `<span class="truncate">${o.textContent.trim()}</span>${isSel ? `<svg class="w-3.5 h-3.5 text-current flex-shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>` : ''}`;
+      });
+      menu.classList.remove('open');
+      trigger.classList.remove('active');
+      selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    menu.appendChild(optDiv);
+  });
+
+  trigger.addEventListener('click', (e)=>{
+    e.stopPropagation();
+    const isOpen = menu.classList.contains('open');
+    document.querySelectorAll('.custom-select-menu.open').forEach(m=>{
+      m.classList.remove('open');
+      m.previousElementSibling?.classList.remove('active');
+    });
+    if(!isOpen){
+      menu.classList.add('open');
+      trigger.classList.add('active');
+    }
+  });
+
+  wrapper.appendChild(trigger);
+  wrapper.appendChild(menu);
+  selectEl.parentNode.insertBefore(wrapper, selectEl.nextSibling);
+}
+
+document.addEventListener('click', ()=>{
+  document.querySelectorAll('.custom-select-menu.open').forEach(m=>{
+    m.classList.remove('open');
+    m.previousElementSibling?.classList.remove('active');
+  });
+});
+
 // (2026-07-13) Toggle custom seed input visibility on select change; prev: static
 function setupCustomSeedToggle(selectId, inputId){
   const selectEl = document.getElementById(selectId);
   const inputEl = document.getElementById(inputId);
   if(!selectEl || !inputEl) return;
+  createCustomSelect(selectEl);
   const update = ()=>{
     const isCustom = selectEl.value === 'Custom Variety';
     inputEl.classList.toggle('hidden', !isCustom);
@@ -1367,7 +1448,8 @@ function renderTowerPhotoGallery(){
           </div>` : `
           <div style="position:absolute !important; bottom:0 !important; left:0 !important; right:0 !important; width:100% !important; height:50% !important; background:linear-gradient(to top, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.3) 60%, rgba(0,0,0,0) 100%) !important; pointer-events:none !important; z-index:5 !important;"></div>
           <div class="absolute inset-x-0 bottom-0 p-2 text-white pointer-events-none w-full overflow-hidden" style="z-index:20 !important;">
-            <div class="font-bold truncate text-white" style="font-size:10px !important; line-height:1.2; color:#FFFFFF !important; text-shadow:0 1px 3px rgba(0,0,0,0.9);">${e.day ? `Day ${e.day} <span style="opacity:0.65;font-weight:500;color:rgba(255,255,255,0.75);">· ${e.stage}</span>` : `<span style="opacity:0.65;font-weight:500;color:rgba(255,255,255,0.75);">${e.stage || 'Photo'}</span>`}</div>
+            <!-- (2026-07-13) Set stage text to readable slate gray; prev: translucent white -->
+            <div class="font-bold truncate text-white" style="font-size:10px !important; line-height:1.2; color:#FFFFFF !important; text-shadow:0 1px 3px rgba(0,0,0,0.9);">${e.day ? `Day ${e.day} <span style="color:#CBD5E1 !important;font-weight:600;text-shadow:0 1px 3px rgba(0,0,0,0.95);">· ${e.stage}</span>` : `<span style="color:#CBD5E1 !important;font-weight:600;text-shadow:0 1px 3px rgba(0,0,0,0.95);">${e.stage || 'Photo'}</span>`}</div>
           </div>`}
       </div>`;
     });
@@ -2360,8 +2442,8 @@ document.getElementById('galleryPhotoInput')?.addEventListener('change', (e)=>{
       state.photoLog.unshift(entry);
       processedCount++;
 
-      // (2026-07-13) Sync each photo to separate Firestore document
-      if(typeof cloudSync !== 'undefined' && cloudSync.connected){
+      // (2026-07-13) Push photo to Firestore subcollection; prev: connected check only
+      if(typeof cloudSync !== 'undefined' && (cloudSync.connected || cloudSync.user)){
         cloudSync.syncPhoto(entry).catch(err => console.error('Photo sync error:', err));
       }
 
@@ -2449,6 +2531,9 @@ function openRowModal(rowId){
     </div>
     <div class="grid grid-cols-4 gap-2 mb-4">${pockets.map(p=>pocketChipHTML(p)).join('')}</div>
     <button id="btnDeleteRow" class="w-full text-[12.5px] font-medium text-clay bg-[#FCEBD8] rounded-lg py-2.5 flex items-center justify-center gap-1.5">${icon('x-circle','w-4 h-4',16)} Delete This Row</button>`;
+
+  // (2026-07-13) Initialize custom select on rowVariety; prev: plain select
+  createCustomSelect(document.getElementById('rowVariety'));
 
   body.querySelectorAll('[data-pocket-chip]').forEach(btn=>btn.addEventListener('click', ()=>{ closeModal('rowModal'); openPocketModal(Number(btn.dataset.pocketChip)); }));
 
@@ -3044,7 +3129,8 @@ function renderNursery(){
       </div>
       <div class="text-[11.5px] text-ink-soft mb-3 flex items-center gap-1.5 font-medium">${icon('timer','w-3.5 h-3.5 flex-shrink-0 text-forest',14)} ${ready? 'Ready now' : `${est.label} in ${est.daysUntil}d (${fmtDate(est.date)})`}</div>
 
-      <div class="rounded-xl p-3 mb-3 nursery-tray-bed overflow-auto max-h-[300px]">
+      <!-- (2026-07-13) Remove scroll trapping on nursery tray bed; prev: overflow-auto max-h-[300px] -->
+      <div class="rounded-xl p-3 mb-3 nursery-tray-bed">
         <div class="grid gap-1 sm:gap-1.5 touch-pan-y" style="grid-template-columns:repeat(${cols},minmax(0,1fr));touch-action:pan-y;" data-tray-grid="${t.id}"></div>
       </div>
 
@@ -3198,8 +3284,11 @@ function openTrayCellModal(trayId, cellIndices){
   const firstCell = cells[targetIndices[0]];
   if(!firstCell) return;
 
-  const titleText = isMulti ? `Tray "${tray.variety}" · ${targetIndices.length} Seedlings Selected` : `Tray "${tray.variety}" · Cell #${targetIndices[0]+1} [${firstCell.id}]`;
-  document.getElementById('trayCellModalTitle').textContent = titleText;
+  // (2026-07-13) Line break before cell number in modal title; prev: single line text
+  const titleHtml = isMulti 
+    ? `Tray "${tray.variety}"<br><span class="text-[14px] font-medium text-ink-soft opacity-90 leading-tight block mt-0.5">${targetIndices.length} Seedlings Selected</span>` 
+    : `Tray "${tray.variety}"<br><span class="text-[14px] font-medium text-ink-soft opacity-90 leading-tight block mt-0.5">Cell #${targetIndices[0]+1} [${firstCell.id}]</span>`;
+  document.getElementById('trayCellModalTitle').innerHTML = titleHtml;
   
   const body = document.getElementById('trayCellModalBody');
   const health = isMulti ? 'healthy' : (firstCell.health || 'healthy');
@@ -3293,15 +3382,16 @@ function openEditTrayModal(trayId){
 
   const varSel = document.getElementById('editTrayVariety');
   const customEl = document.getElementById('editTrayCustomName');
-  varSel.innerHTML = CROP_PRESETS.map(c=>`<option value="${c.name}">${c.name}</option>`).join('') + `<option value="__custom__">Custom Variety…</option>`;
+  // (2026-07-13) Unified CROP_PRESETS in edit tray modal; prev: added duplicate custom
+  varSel.innerHTML = CROP_PRESETS.map(c=>`<option value="${c.name}">${c.name}</option>`).join('');
 
-  const isPreset = CROP_PRESETS.some(c=>c.name===tray.variety);
+  const isPreset = CROP_PRESETS.some(c=>c.name===tray.variety && c.name!=='Custom Variety');
   if(isPreset){
     varSel.value = tray.variety;
     customEl.classList.add('hidden'); customEl.value = '';
   } else {
-    varSel.value = '__custom__';
-    customEl.classList.remove('hidden'); customEl.value = tray.variety;
+    varSel.value = 'Custom Variety';
+    customEl.classList.remove('hidden'); customEl.value = (tray.variety==='Custom Variety' ? '' : (tray.variety||''));
   }
   setupCustomSeedToggle('editTrayVariety','editTrayCustomName');
 
@@ -3335,7 +3425,7 @@ document.getElementById('editTrayForm')?.addEventListener('submit',(e)=>{
   if(!tray) return;
   const customName = document.getElementById('editTrayCustomName')?.value.trim();
   const presetVariety = document.getElementById('editTrayVariety')?.value;
-  tray.variety = customName || (presetVariety==='__custom__' ? tray.variety : presetVariety) || tray.variety;
+  tray.variety = (presetVariety==='Custom Variety' ? customName : presetVariety) || customName || tray.variety;
   tray.startDate = document.getElementById('editTrayDate').value || tray.startDate;
   const r = Math.min(10, Math.max(1, Number(document.getElementById('editTrayGridRows')?.value)||1));
   const c = Math.min(10, Math.max(1, Number(document.getElementById('editTrayGridCols')?.value)||1));
@@ -3797,19 +3887,20 @@ function renderExpenses(){
   renderHarvestGallery();
 }
 
+// (2026-07-13) Compress harvest photo for fast cloud sync; prev: raw reader
 let pendingHarvestPhoto = null;
 document.getElementById('harvestPhotoInput')?.addEventListener('change', (e)=>{
   const file = e.target.files[0]; if(!file) return;
-  const reader = new FileReader();
-  reader.onload = ()=>{
-    pendingHarvestPhoto = reader.result;
+  compressImage(file, 800, 0.75).then(dataUrl => {
+    pendingHarvestPhoto = dataUrl;
     const imgEl = document.getElementById('harvestPhotoImg');
     const prevEl = document.getElementById('harvestPhotoPreview');
-    if(imgEl) imgEl.src = reader.result;
+    if(imgEl) imgEl.src = dataUrl;
     if(prevEl) prevEl.classList.remove('hidden');
     showToast('Harvest photo attached', 'forest', 'camera');
-  };
-  reader.readAsDataURL(file);
+  }).catch(err => {
+    console.error('Harvest photo compression failed:', err);
+  });
 });
 document.getElementById('btnRemoveHarvestPhoto')?.addEventListener('click', ()=>{
   pendingHarvestPhoto = null;
@@ -4432,8 +4523,11 @@ window.addEventListener('popstate', ()=>{
     }
   }
 
+  // (2026-07-13) Support mainContent scrollTop in pull-to-refresh; prev: window only
   window.addEventListener('touchstart', (e) => {
-    if ((window.scrollY === 0 || document.documentElement.scrollTop === 0) && !isRefreshing && e.touches.length === 1) {
+    const mainEl = document.getElementById('mainContent');
+    const atTop = (window.scrollY === 0 || document.documentElement.scrollTop === 0) && (!mainEl || mainEl.scrollTop === 0);
+    if (atTop && !isRefreshing && e.touches.length === 1) {
       startX = e.touches[0].clientX;
       startY = e.touches[0].clientY;
       isPulling = true;
@@ -4442,7 +4536,9 @@ window.addEventListener('popstate', ()=>{
   }, { passive: true });
 
   window.addEventListener('touchmove', (e) => {
-    if (!isPulling || isRefreshing || (window.scrollY > 0 && document.documentElement.scrollTop > 0)) return;
+    const mainEl = document.getElementById('mainContent');
+    const isPastTop = (window.scrollY > 0 && document.documentElement.scrollTop > 0) || (mainEl && mainEl.scrollTop > 0);
+    if (!isPulling || isRefreshing || isPastTop) return;
     const currentX = e.touches[0].clientX;
     const currentY = e.touches[0].clientY;
     const deltaX = currentX - startX;
